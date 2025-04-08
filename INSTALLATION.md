@@ -8,7 +8,7 @@ Before starting, ensure you have:
 
 1. Python 3.6 or higher installed
 2. Access to your Racktables MySQL/MariaDB database
-3. A running NetBox instance with API access
+3. A running NetBox instance (version 4.2.6 or higher) with API access
 4. Administrative privileges on the NetBox instance to add custom fields
 
 ## Installation Steps
@@ -65,31 +65,38 @@ pip install -r requirements.txt
 
 If using pipx (Option B), the dependencies are already installed from the previous step.
 
-### 4. Configure NetBox Custom Fields
+### 4. Configure NetBox MAX_PAGE_SIZE Setting
 
-You need to add the custom fields to your NetBox instance. The included `custom_fields.yml` file contains all the necessary field definitions.
+Run the provided script to check and set the required MAX_PAGE_SIZE setting in your NetBox instance:
 
-There are several ways to add these:
+```bash
+# First, edit the script to set your NetBox Docker path
+nano max-page-size-check.sh
 
-#### Option 1: Using NetBox's UI
+# Make the script executable
+chmod +x max-page-size-check.sh
 
-Navigate to the NetBox admin interface and add each field manually according to the definitions in `custom_fields.yml`.
+# Run the script
+./max-page-size-check.sh
+```
 
-#### Option 2: Using NetBox's Configuration
+This will check if the MAX_PAGE_SIZE is already set to 0 and offer to update it if needed. This setting is required for the migration tool to properly fetch all objects in a single request.
 
-If you're using NetBox with Docker or a similar setup:
+### 5. Configure NetBox Custom Fields
 
-1. Copy `custom_fields.yml` to your NetBox's configuration directory:
-   ```
-   cp custom_fields.yml /path/to/netbox/initializers/
-   ```
+The migration tool requires specific custom fields to be added to your NetBox instance. Use the provided script to automatically create all required fields:
 
-2. Restart NetBox to apply the configuration:
-   ```
-   docker-compose restart netbox
-   ```
+```bash
+# Edit the script to set your API token
+nano set_custom_fields.py
 
-### 5. Configure Database and API Connection
+# Run the script
+python set_custom_fields.py
+```
+
+Alternatively, you can add custom fields manually using NetBox's UI according to the definitions in `custom_fields.yml`.
+
+### 6. Configure Database and API Connection
 
 Edit `migrate.py` to set your connection parameters:
 
@@ -105,16 +112,6 @@ nb_host = '10.248.48.4'  # Your NetBox host
 nb_port = 8001           # NetBox API port
 nb_token = '0123456789abcdef0123456789abcdef01234567'  # Your API token
 ```
-
-### 6. Adjust NetBox Settings
-
-Set `MAX_PAGE_SIZE=0` in your NetBox's `env/netbox.env` configuration file to allow retrieving all objects in a single request.
-
-```
-MAX_PAGE_SIZE=0
-```
-
-After making this change, restart your NetBox instance for the setting to take effect.
 
 ### 7. Test Database Connection
 
@@ -175,6 +172,7 @@ pipx run --spec=. python migrate_wrapper.py
    - Verify the API token is valid
    - Check network connectivity to the NetBox server
    - Ensure the API is enabled in NetBox settings
+   - Confirm your NetBox version is 4.2.6 or higher
 
 4. **Missing Custom Fields**
    
@@ -182,6 +180,7 @@ pipx run --spec=. python migrate_wrapper.py
    - Check if custom fields were properly added to NetBox
    - Verify field names match those expected in the script
    - Restart NetBox after adding custom fields
+   - Check the output of the set_custom_fields.py script for errors
 
 5. **Memory or Performance Issues**
    
