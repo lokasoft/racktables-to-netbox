@@ -158,22 +158,22 @@ slugified_attributes = dict()
 hw_types = dict()
 
 def error_log(string):
-	with open("errors", "a") as error_file:
-		error_file.write(string + "\n")
+    with open("errors", "a") as error_file:
+        error_file.write(string + "\n")
 
 def pickleLoad(filename, default):
-	if os.path.exists(filename):
-		file = open(filename, 'rb')
-		data = pickle.load(file)
-		file.close()
-		return data
-	return default
+    if os.path.exists(filename):
+        file = open(filename, 'rb')
+        data = pickle.load(file)
+        file.close()
+        return data
+    return default
 
 def pickleDump(filename, data):
-	if STORE_DATA:
-		file = open(filename, 'wb')
-		pickle.dump(data, file)
-		file.close()
+    if STORE_DATA:
+        file = open(filename, 'wb')
+        pickle.dump(data, file)
+        file.close()
 		
 def getRackHeight(cursor, rackId):
 	cursor.execute("SELECT uint_value FROM AttributeValue WHERE object_id={} AND attr_id=27;".format(rackId))
@@ -507,30 +507,46 @@ def createObjectsInRackFromAtoms(cursor, atoms, rack_name, rack_id):
 
 # Necessary to split get_interfaces() calls because the current 50,000 interfaces fails to ever return
 def get_interfaces():
-
-	interfaces = []
-	interfaces_file = "interfaces"
-	
-	limit = 500
-	offset = 0
-
-	# Uncomment this if created interfaces successfully previously and have their data in the file
-	# or get_interfaces_custom was not added (likely) and you are only running the script once without error
-	return pickleLoad(interfaces_file, [])
-
-	while True:
-		# In netbox-python dcim.py I defined this as: Some issue with setting limit and offset made it necessary
-		# def get_interfaces_custom(self, limit, offset, **kwargs):
- 		#       return self.netbox_con.get('/dcim/interfaces', limit=limit, offset=offset, **kwargs)
-		ret = netbox.dcim.get_interfaces_custom(limit=limit, offset=offset)
-		if ret:
-			interfaces.extend(ret)
-			offset += limit
-			print("Added {} interfaces, total {}".format(limit, len(interfaces)))
-		else:
-			pickleDump(interfaces_file, interfaces)
-			return interfaces
-
+    """Retrieve all interfaces from NetBox with pagination
+    
+    This function retrieves interfaces from NetBox using pagination to handle
+    large numbers of interfaces. It caches the results to avoid repeated queries.
+    
+    Returns:
+        list: A list of interface objects
+    """
+    interfaces = []
+    interfaces_file = "interfaces"
+    
+    # First try to load cached interfaces
+    cached_interfaces = pickleLoad(interfaces_file, [])
+    if cached_interfaces:
+        print(f"Loaded {len(cached_interfaces)} interfaces from cache")
+        return cached_interfaces
+    
+    print("Fetching interfaces from NetBox...")
+    limit = 500
+    offset = 0
+    
+    try:
+        while True:
+            ret = netbox.dcim.get_interfaces_custom(limit=limit, offset=offset)
+            if not ret:
+                # No more interfaces to fetch
+                break
+                
+            interfaces.extend(ret)
+            offset += limit
+            print(f"Added {len(ret)} interfaces, total {len(interfaces)}")
+    except Exception as e:
+        error_log(f"Error retrieving interfaces: {str(e)}")
+        print(f"Error retrieving interfaces: {str(e)}")
+    
+    print(f"Total interfaces fetched: {len(interfaces)}")
+    
+    # Cache the result for later use
+    pickleDump(interfaces_file, interfaces)
+    return interfaces
 def device_is_in_cluster(device_id):
 	cursor.execute("SELECT parent_entity_id FROM EntityLink WHERE parent_entity_type=\"object\" AND child_entity_id={};".format(device_id))
 	parent_entity_ids = [parent_entity_id[0] for parent_entity_id in cursor.fetchall()]
