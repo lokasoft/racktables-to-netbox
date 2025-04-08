@@ -1,0 +1,5 @@
+python-netbox>=0.0.24
+python-slugify>=5.0.0
+pymysql>=1.0.0
+ipaddress>=1.0.0
+requests>=2.25.0
