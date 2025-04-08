@@ -16,7 +16,7 @@ Before starting, ensure you have:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/username/racktables-to-netbox.git
+git clone https://github.com/enoch85/racktables-to-netbox.git
 cd racktables-to-netbox
 ```
 
