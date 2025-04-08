@@ -20,18 +20,50 @@ git clone https://github.com/username/racktables-to-netbox.git
 cd racktables-to-netbox
 ```
 
-### 2. Set Up a Virtual Environment (recommended)
+### 2. Set Up a Python Environment
+
+Modern Python distributions like Ubuntu 24.04 use externally managed environments (PEP 668) which prevent installing packages directly with pip. You have two options:
+
+#### Option A: Use a Virtual Environment (Recommended)
 
 ```bash
-python -m venv venv
+# Make sure you have the required packages
+sudo apt install python3-full python3-venv
+
+# Create and activate a virtual environment
+python3 -m venv venv
 source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+```
+
+#### Option B: Use pipx
+
+If you prefer to use pipx (which manages isolated environments for applications):
+
+```bash
+# Install pipx if not already installed
+sudo apt install pipx
+pipx ensurepath
+
+# Create a directory for the tool to operate in
+mkdir -p ~/.local/pipx/venvs/racktables-netbox
+cd ~/.local/pipx/venvs/racktables-netbox
+
+# Clone the repository here
+git clone https://github.com/username/racktables-to-netbox.git .
+
+# Install dependencies in this isolated environment
+pipx run --pip-args="-r requirements.txt" python -c ""
 ```
 
 ### 3. Install Dependencies
 
+If using a virtual environment (Option A):
+
 ```bash
 pip install -r requirements.txt
 ```
+
+If using pipx (Option B), the dependencies are already installed from the previous step.
 
 ### 4. Configure NetBox Custom Fields
 
@@ -104,15 +136,31 @@ connection.close()
 
 Run the wrapper script to perform the migration:
 
+If using a virtual environment:
 ```bash
 python migrate_wrapper.py
+```
+
+If using pipx:
+```bash
+pipx run --spec=. python migrate_wrapper.py
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Database Connection Issues**
+1. **Externally Managed Environment Error**
+   
+   If you see an error like:
+   ```
+   error: externally-managed-environment
+   This environment is externally managed
+   ```
+   
+   This means you need to use a virtual environment or pipx as described in the installation steps.
+
+2. **Database Connection Issues**
    
    If you encounter database connection problems, check:
    - Database credentials in `migrate.py`
@@ -121,21 +169,21 @@ python migrate_wrapper.py
    
    Try connecting with a MySQL client to verify credentials.
 
-2. **NetBox API Connection Issues**
+3. **NetBox API Connection Issues**
    
    If you have problems connecting to NetBox:
    - Verify the API token is valid
    - Check network connectivity to the NetBox server
    - Ensure the API is enabled in NetBox settings
 
-3. **Missing Custom Fields**
+4. **Missing Custom Fields**
    
    If data isn't being correctly migrated because of missing custom fields:
    - Check if custom fields were properly added to NetBox
    - Verify field names match those expected in the script
    - Restart NetBox after adding custom fields
 
-4. **Memory or Performance Issues**
+5. **Memory or Performance Issues**
    
    If the script runs out of memory or is too slow:
    - Try running parts of the migration by adjusting the boolean flags
