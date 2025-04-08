@@ -10,27 +10,25 @@ extensions applied.
 import os
 import sys
 import importlib.util
-from custom_netbox import ExtendedNetBox
+from custom_netbox import NetBoxWrapper
 
 # Keep the original environment
 original_env = dict(os.environ)
 
 def run_migration():
-    """Run the migration script with the extended NetBox class"""
+    """Run the migration script with the updated NetBox wrapper class"""
     print("Starting Racktables to NetBox migration with enhanced NetBox library...")
     
     # Import the migrate module
     spec = importlib.util.spec_from_file_location("migrate", "migrate.py")
     migrate = importlib.util.module_from_spec(spec)
     
-    # Save original NetBox import
-    import netbox
-    original_netbox = netbox.NetBox
+    # Create a global variable 'NetBox' in the builtins
+    # This simulates having 'from netbox import NetBox' available everywhere
+    import builtins
+    builtins.NetBox = NetBoxWrapper
     
     try:
-        # Replace the NetBox class with our extended version
-        netbox.NetBox = ExtendedNetBox
-        
         # Execute the migrate module
         spec.loader.exec_module(migrate)
         
@@ -39,11 +37,14 @@ def run_migration():
         
     except Exception as e:
         print(f"Error during migration: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
         
     finally:
-        # Restore the original NetBox class
-        netbox.NetBox = original_netbox
+        # Clean up the global we added
+        if hasattr(builtins, 'NetBox'):
+            delattr(builtins, 'NetBox')
         
         # Restore original environment
         os.environ.clear()
