@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """
-Script to create custom fields in NetBox 4.2.6 via the API
-
-This script creates the custom fields required for the Racktables to NetBox
-migration tool using the NetBox API, with fixes for NetBox 4.2.6 format.
-
-Usage:
-  1. Update the API_TOKEN variable
-  2. Run the script with Python 3
+Extended custom fields script for Racktables to NetBox migration
+Includes support for additional Racktables tables not covered in original migration
 """
 
 import requests
@@ -16,8 +10,8 @@ import time
 import sys
 
 # Configuration - UPDATE YOUR API TOKEN
-API_URL = "http://localhost:8000"  # We know this works from your test
-API_TOKEN = "your-api-token"       # Update with your token
+API_URL = "http://localhost:8000"
+API_TOKEN = "your-api-token"
 
 # Headers for API requests
 HEADERS = {
@@ -71,8 +65,8 @@ def create_custom_field(name, field_type, object_types, description="", required
         print(f"✗ Connection error: {str(e)}")
         return False
 
-# Custom fields to create - CORRECTED FORMAT
-custom_fields = [
+# Original custom fields (keeping these)
+original_custom_fields = [
     # VLAN Group custom fields
     {"name": "VLAN_Domain_ID", "type": "text", "object_types": ["ipam.vlangroup"], 
      "description": "ID for VLAN Domain", "required": True},
@@ -156,14 +150,66 @@ custom_fields = [
     {"name": "GPU_Serial_Number_2", "type": "text", "object_types": ["dcim.device"]},
 ]
 
+# New custom fields for additional tables
+new_custom_fields = [
+    # Cable Management custom fields for dcim.cable
+    {"name": "Patch_Cable_Type", "type": "text", "object_types": ["dcim.cable"], 
+     "description": "Type of patch cable from Racktables"},
+    {"name": "Patch_Cable_Connector_A", "type": "text", "object_types": ["dcim.cable"], 
+     "description": "A-side connector type"},
+    {"name": "Patch_Cable_Connector_B", "type": "text", "object_types": ["dcim.cable"], 
+     "description": "B-side connector type"},
+    {"name": "Cable_Color", "type": "text", "object_types": ["dcim.cable"], 
+     "description": "Color of the cable"},
+    {"name": "Cable_Length", "type": "text", "object_types": ["dcim.cable"], 
+     "description": "Length of the cable"},
+    
+    # Virtual Services custom fields
+    {"name": "VS_Enabled", "type": "boolean", "object_types": ["ipam.service"], 
+     "description": "Virtual service is enabled"},
+    {"name": "VS_Type", "type": "text", "object_types": ["ipam.service"], 
+     "description": "Type of virtual service"},
+    {"name": "VS_Protocol", "type": "text", "object_types": ["ipam.service"], 
+     "description": "Protocol used by virtual service"},
+    
+    # NAT & Load Balancing custom fields for IP Addresses
+    {"name": "NAT_Type", "type": "text", "object_types": ["ipam.ipaddress"], 
+     "description": "Type of NAT (SNAT, DNAT, etc.)"},
+    {"name": "NAT_Match_IP", "type": "text", "object_types": ["ipam.ipaddress"], 
+     "description": "Matching IP for NAT relationship"},
+    {"name": "LB_Config", "type": "text", "object_types": ["ipam.ipaddress"], 
+     "description": "Load balancer configuration"},
+    {"name": "LB_Pool", "type": "text", "object_types": ["ipam.ipaddress"], 
+     "description": "Load balancer pool membership"},
+    {"name": "RS_Pool", "type": "text", "object_types": ["ipam.ipaddress"], 
+     "description": "Real server pool"},
+    
+    # Monitoring custom fields for devices
+    {"name": "Cacti_Server", "type": "text", "object_types": ["dcim.device"],
+     "description": "Cacti server monitoring this device"},
+    {"name": "Cacti_Graph_ID", "type": "text", "object_types": ["dcim.device"], 
+     "description": "ID of Cacti graph for this device"},
+    {"name": "Monitoring_URL", "type": "text", "object_types": ["dcim.device"], 
+     "description": "URL to monitoring system for this device"},
+    
+    # Attachment custom fields 
+    {"name": "File_References", "type": "text", "object_types": ["dcim.device", "virtualization.virtualmachine"], 
+     "description": "References to attached files from Racktables"},
+    {"name": "File_Description", "type": "text", "object_types": ["extras.objectchange"], 
+     "description": "Description of attached file"}
+]
+
 def main():
     """Main function to create custom fields"""
-    print(f"Creating {len(custom_fields)} custom fields in NetBox 4.2.6...")
+    # Combine all custom fields
+    all_custom_fields = original_custom_fields + new_custom_fields
+    
+    print(f"Creating {len(all_custom_fields)} custom fields in NetBox 4.2.6...")
     
     success_count = 0
     failure_count = 0
     
-    for field in custom_fields:
+    for field in all_custom_fields:
         success = create_custom_field(
             field["name"],
             field["type"],
