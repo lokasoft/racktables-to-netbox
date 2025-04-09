@@ -27,9 +27,13 @@ def run_migration(args):
     """Run the migration script with the updated NetBox wrapper class"""
     print("Starting Racktables to NetBox migration with enhanced NetBox library...")
     
-    # Import the migrate_extended module
-    spec = importlib.util.spec_from_file_location("migrate_additional", "extended_migrate.py")
-    migrate_additional = importlib.util.module_from_spec(spec)
+    # Import the migrate module
+    migrate_spec = importlib.util.spec_from_file_location("migrate", "migrate.py")
+    migrate = importlib.util.module_from_spec(migrate_spec)
+    
+    # Import the extended_migrate module
+    extended_spec = importlib.util.spec_from_file_location("extended_migrate", "extended_migrate.py")
+    extended_migrate = importlib.util.module_from_spec(extended_spec)
     
     # Create a global variable 'NetBox' in the builtins
     # This simulates having 'from netbox import NetBox' available everywhere
@@ -37,14 +41,17 @@ def run_migration(args):
     builtins.NetBox = NetBoxWrapper
     
     try:
-        # Execute the migrate_additional module
-        spec.loader.exec_module(migrate_additional)
-        
         # Set the target site if specified
         if args.site:
             print(f"Target site specified: {args.site}")
-            # Set the TARGET_SITE variable in the migrate module
-            migrate_additional.TARGET_SITE = args.site
+            # Import the config module to set TARGET_SITE
+            from racktables_netbox_migration.config import TARGET_SITE
+            import racktables_netbox_migration.config as config
+            config.TARGET_SITE = args.site
+        
+        # Execute the migration modules
+        migrate_spec.loader.exec_module(migrate)
+        extended_spec.loader.exec_module(extended_migrate)
         
         print("Migration completed successfully!")
         return True
@@ -70,9 +77,13 @@ if __name__ == "__main__":
     
     # First run set_custom_fields.py to ensure all custom fields are created
     print("Setting up custom fields...")
-    custom_fields_spec = importlib.util.spec_from_file_location("set_custom_fields", "set_custom_fields.py")
-    custom_fields = importlib.util.module_from_spec(custom_fields_spec)
-    custom_fields_spec.loader.exec_module(custom_fields)
+    try:
+        custom_fields_spec = importlib.util.spec_from_file_location("set_custom_fields", "set_custom_fields.py")
+        custom_fields = importlib.util.module_from_spec(custom_fields_spec)
+        custom_fields_spec.loader.exec_module(custom_fields)
+    except Exception as e:
+        print(f"Warning: Error setting up custom fields: {e}")
+        print("Continuing with migration...")
     
     # Run the migration
     success = run_migration(args)
