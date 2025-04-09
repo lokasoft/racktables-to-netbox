@@ -1,5 +1,5 @@
 """
-Extended migration script for transferring data from Racktables to NetBox
+Additional migration script for transferring data from Racktables to NetBox
 This version includes support for additional tables not covered in the original migration
 """
 
@@ -799,9 +799,9 @@ def migrate_monitoring(cursor, netbox):
     
     print("Monitoring data migration completed.")
 
-# Extended main function that calls existing migrations and adds new ones
-def migrate_extended():
-    """Run the extended migration process including additional tables"""
+# Main function that calls existing migrations and adds new ones
+def migrate_additional():
+    """Run the additional migration process including additional tables"""
     
     # Run original migration components if enabled
     if CREATE_VLAN_GROUPS or CREATE_VLANS or CREATE_MOUNTED_VMS or CREATE_UNMOUNTED_VMS or \
@@ -833,7 +833,7 @@ def migrate_extended():
         if CREATE_MONITORING_DATA:
             migrate_monitoring(cursor, netbox)
     
-    print("\nExtended migration completed successfully!")
+    print("\nAdditional migration completed successfully!")
 
 if __name__ == "__main__":
-    migrate_extended()
+    migrate_additional()
