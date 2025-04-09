@@ -642,7 +642,12 @@ def get_custom_fields(racktables_object_id, initial_dict=None):
 
 # Create the device in this list and return those that could not be created because the parent did not exist yet
 def create_parent_child_devices(data, objtype_id):
-    global global_non_physical_object_ids
+    global global_non_physical_object_ids, asset_tags
+
+    # Create a log file for tracking device creation issues
+    def log_device_error(message):
+        with open("device_creation_errors.log", "a") as error_log:
+            error_log.write(f"{message}\n")
 
     existing_site_names = set(site['name'] for site in netbox.dcim.get_sites())
     existing_device_roles = set(device_role['name'] for device_role in netbox.dcim.get_device_roles())
@@ -662,160 +667,173 @@ def create_parent_child_devices(data, objtype_id):
         existing_device_bays[parent_name].add(device_bay['name'])
     
     not_created_parents = []
-    for racktables_device_id,object_name,label,asset_no,comment in data:
+    for racktables_device_id, object_name, label, asset_no, comment in data:
         
         # Used for a child device whose parent isn't yet created and needs to be skipped
         not_created_parent = False
 
         # Some names in racktables have trailing or leading spaces
         if not object_name:
-            print("No name for", racktables_device_id,object_name,label,asset_no,comment)
+            log_device_error(f"No name for device ID {racktables_device_id}")
             continue
 
         object_name = object_name.strip()
-        if object_name not in existing_device_names:
-            # Create a "None" site, device type, role, manufacturer and finally device for this loose object 
-            site_name = "None"
-            
-            manufacturer, device_role, device_type_model = get_manufacturer_role_type(racktables_device_id, objtype_id, 0, False)
+        if object_name in existing_device_names:
+            # If the device already exists, skip it
+            log_device_error(f"Device {object_name} already exists")
+            continue
 
-            # print("Starting {}".format(object_name))
+        # Create a "None" site, device type, role, manufacturer and finally device for this loose object 
+        site_name = "None"
+        
+        manufacturer, device_role, device_type_model = get_manufacturer_role_type(racktables_device_id, objtype_id, 0, False)
 
-            if site_name not in existing_site_names:
+        # Ensure site exists
+        if site_name not in existing_site_names:
+            try:
                 netbox.dcim.create_site(site_name, slugify(site_name))
                 existing_site_names.add(site_name)
                 print("Added non rack site", site_name)
+            except Exception as e:
+                log_device_error(f"Error creating site {site_name}: {str(e)}")
+                site_name = 'Global'  # Fallback to a default site if needed
 
-            if device_role not in existing_device_roles:
-                netbox.dcim.create_device_role(device_role,"ffffff",slugify(device_role))
+        # Ensure device role exists
+        if device_role not in existing_device_roles:
+            try:
+                netbox.dcim.create_device_role(device_role, "ffffff", slugify(device_role))
                 existing_device_roles.add(device_role)
                 print("Added non rack device role", device_role)
-            
-            if manufacturer not in existing_manufacturers:
+            except Exception as e:
+                log_device_error(f"Error creating device role {device_role}: {str(e)}")
+                # Use a default role if creation fails
+                device_role = 'generic'
+        
+        # Ensure manufacturer exists
+        if manufacturer not in existing_manufacturers:
+            try:
                 netbox.dcim.create_manufacturer(manufacturer, slugify(manufacturer))
                 existing_manufacturers.add(manufacturer)
                 print("Added non rack manufacturer", manufacturer)
+            except Exception as e:
+                log_device_error(f"Error creating manufacturer {manufacturer}: {str(e)}")
+                # Use a default manufacturer if creation fails
+                manufacturer = 'Generic'
 
-            is_child = False
-            is_child_parent_id = None
-            is_child_parent_name = None
+        # Check if the device is in a VM cluster 
+        device_in_vm_cluster, device_vm_cluster_name, parent_entity_ids = device_is_in_cluster(racktables_device_id)
 
-            is_parent = False                
+        # Determine device type and subdevice role
+        is_child = False
+        is_parent = False
+        subdevice_role = ""
 
-            # Check if the device is in a VM cluster and if so add it to that when creating it in Netbox
-            device_in_vm_cluster, device_vm_cluster_name, parent_entity_ids = device_is_in_cluster(racktables_device_id)
-
-            # Check if it is a child device that needs to be created with a child device type then created marked as mounted inside a parent device's device bay.
-            # The parent device might not exist yet, in which case it is skipped and retried after 
-            for parent_from_pairs_objtype_id, child_from_pairs_objtype_id in parent_child_objtype_id_pairs:
-                
-                # Server that might reside in a server chassis
-                if objtype_id == child_from_pairs_objtype_id:
-                    
-                    # Got a parent id, so check that it is a Server Chassis and if so, create the device type with child and later add a device bay to that parent object with this newly created child Server object
-                    for parent_entity_id in parent_entity_ids:
-                        with get_db_connection() as connection:
-                            with get_cursor(connection) as cursor:
-                                cursor.execute("SELECT objtype_id,name FROM Object WHERE id=%s", (parent_entity_id,))
-                                result = cursor.fetchone()
-                                if result:
-                                    parent_objtype_id, parent_name = result["objtype_id"], result["name"]
-                        
-                        if parent_objtype_id == parent_from_pairs_objtype_id:
-                            parent_name = parent_name.strip()
-                            is_child_parent_id = netbox.dcim.get_devices(name=parent_name)
-                            
-                            # The parent is not yet created, so break creating this device and come back later
-                            if not is_child_parent_id:
-                                not_created_parents.append((racktables_device_id,object_name,label,asset_no,comment))
-                                not_created_parent = True
-                                break
-                            else:
-                                is_child_parent_id = is_child_parent_id[0]['id']
-
-                            is_child_parent_name = parent_name
-                            is_child = True
-                            # print("{} child".format(object_name))
-                            break
-                    
-                    if is_child:
-                        break
-
-                # Could be a loose patch panel that has child devices
-                if objtype_id == parent_from_pairs_objtype_id and not not_created_parent:
+        # Check for parent-child relationships
+        for parent_from_pairs_objtype_id, child_from_pairs_objtype_id in parent_child_objtype_id_pairs:
+            if objtype_id == child_from_pairs_objtype_id:
+                # Check for parent
+                for parent_entity_id in parent_entity_ids:
                     with get_db_connection() as connection:
                         with get_cursor(connection) as cursor:
-                            cursor.execute("SELECT child_entity_id FROM EntityLink WHERE parent_entity_type=\"object\" AND parent_entity_id=%s", (racktables_device_id,))
-                            child_entity_ids = cursor.fetchall()
+                            cursor.execute("SELECT objtype_id,name FROM Object WHERE id=%s", (parent_entity_id,))
+                            result = cursor.fetchone()
+                            if result and result["objtype_id"] == parent_from_pairs_objtype_id:
+                                is_child = True
+                                is_child_parent_name = result["name"].strip()
+                                break
+                
+                if is_child:
+                    device_type_model += "-child"
+                    subdevice_role = "child"
+                    break
 
-                    # print(child_entity_ids)
-
-                    for child_entity_id in [x["child_entity_id"] for x in child_entity_ids]:
-                        with get_db_connection() as connection:
-                            with get_cursor(connection) as cursor:
-                                cursor.execute("SELECT objtype_id,name FROM Object WHERE id=%s", (child_entity_id,))
-                                result = cursor.fetchone()
-                                if result:
-                                    child_objtype_id, child_name = result["objtype_id"], result["name"]
-
-                        # print(child_objtype_id, child_name)
-
-                        if child_objtype_id == child_from_pairs_objtype_id:
-                            is_parent = True
-                            # print("{} parent".format(object_name))
-                            break
-                    
-                    if is_parent:
-                        break
-
-            # Continue to next device, skipping the child with no parent yet
-            if not_created_parent:
-                continue
-
-            subdevice_role = ""
-
-            if is_child:
-                device_type_model += "-child"
-                subdevice_role = "child"
-
-            if is_parent:
+            elif objtype_id == parent_from_pairs_objtype_id:
+                is_parent = True
                 device_type_model += "-parent"
                 subdevice_role = "parent"
+                break
 
-            if device_type_model not in existing_device_types:
-                netbox.dcim.create_device_type(model=device_type_model,slug=slugify(device_type_model), manufacturer={"name":manufacturer},u_height=0,subdevice_role=subdevice_role)
+        # Ensure device type exists
+        if device_type_model not in existing_device_types:
+            try:
+                netbox.dcim.create_device_type(
+                    model=device_type_model,
+                    slug=slugify(device_type_model), 
+                    manufacturer={"name":manufacturer},
+                    u_height=0,
+                    subdevice_role=subdevice_role
+                )
                 existing_device_types.add(device_type_model)
+            except Exception as e:
+                log_device_error(f"Error creating device type {device_type_model}: {str(e)}")
+                # If device type creation fails, use a generic type
+                device_type_model = f"Generic-{objtype_id_names.get(objtype_id, 'Device')}"
 
-            device_tags = getTags("object", racktables_device_id)
-            custom_fields = get_custom_fields(racktables_device_id, {"Device_Label": label})
-            serial = serials[racktables_device_id] if racktables_device_id in serials else ""
+        # Prepare device details
+        device_tags = getTags("object", racktables_device_id)
+        custom_fields = get_custom_fields(racktables_device_id, {"Device_Label": label})
+        serial = serials.get(racktables_device_id, "")
+        
+        # Handle asset tag
+        asset_no = asset_no.strip() if asset_no else None
+        if asset_no and asset_no in asset_tags:
+            asset_no = f"{asset_no}-1"
+
+        # Create the device
+        try:
+            added_device = netbox.dcim.create_device(
+                name=object_name,
+                cluster={"name": device_vm_cluster_name} if device_in_vm_cluster else None,
+                asset_tag=asset_no, 
+                serial=serial,
+                custom_fields=custom_fields, 
+                device_type=device_type_model, 
+                device_role=device_role, 
+                site_name=site_name,
+                comment=comment[:200] if comment else "",
+                tags=device_tags
+            )
             
-            asset_no = asset_no.strip() if asset_no else None
-            if asset_no and asset_no in asset_tags:
-                asset_no = asset_no+ "-1"
+            # Track created asset tag
+            if asset_no:
+                asset_tags.add(asset_no)
 
-            # print("Creating device \"{}\"".format(object_name), device_type_model, device_role, manufacturer, site_name, asset_no)        
-            added_device = netbox.dcim.create_device(name=object_name,cluster={"name": device_vm_cluster_name} if device_in_vm_cluster else None,asset_tag=asset_no, serial=serial,custom_fields=custom_fields, device_type=device_type_model, device_role=device_role, site_name=site_name,comment=comment[:200] if comment else "",tags=device_tags)
-            asset_tags.add(asset_no)
-
-            # Later used for creating interfaces
+            # Add to global tracking
             global_non_physical_object_ids.add((object_name, racktables_device_id, added_device['id'], objtype_id))
 
-            # If device was a child device mounted inside a physically mounted parent device, then create a device bay relating to the parent device filled with the just created item
-            # Only one device can be assigned to each bay, so find the first open device bay name for the parent device, then use try and except to add the added device to it, although it should not fail since the child device was just created above
-            if is_child:
+            # Handle child device in parent's device bay
+            if is_child and is_child_parent_name:
+                # Find the parent device
+                parent_devices = netbox.dcim.get_devices(name=is_child_parent_name)
+                if parent_devices:
+                    parent_device = parent_devices[0]
+                    
+                    # Determine new bay name
+                    if is_child_parent_name in existing_device_bays:
+                        try:
+                            new_bay_number = max(int(bay.split('-')[1]) for bay in existing_device_bays[is_child_parent_name]) + 1
+                        except ValueError:
+                            new_bay_number = 1
+                    else:
+                        new_bay_number = 1
+                    
+                    new_bay_name = f"bay-{new_bay_number}"
+                    
+                    # Create device bay
+                    try:
+                        bay = netbox.dcim.create_device_bay(
+                            name=new_bay_name, 
+                            device_id=parent_device['id'], 
+                            installed_device_id=added_device['id']
+                        )
+                        existing_device_bays.setdefault(is_child_parent_name, set()).add(new_bay_name)
+                    except Exception as e:
+                        log_device_error(f"Error creating device bay for {object_name} in {is_child_parent_name}: {str(e)}")
 
-                # Check that this parent object currently has any device bays in it, 
-                if is_child_parent_name in existing_device_bays:
-                    new_bay_name = "bay-" + str(max([int(device_bay_name[len("bay-"):]) for device_bay_name in existing_device_bays[is_child_parent_name]]) + 1)
-                else:
-                    existing_device_bays[is_child_parent_name] = set()
-                    new_bay_name = "bay-1"
-
-                # print(new_bay_name, is_child_parent_name)
-                existing_device_bays[is_child_parent_name].add(new_bay_name)
-
-                netbox.dcim.create_device_bay(new_bay_name, device_id=is_child_parent_id, installed_device_id=added_device['id'])
+        except Exception as e:
+            log_device_error(f"Failed to create device {object_name}: {str(e)}")
+            # If device creation fails, add to not created parents for retry
+            not_created_parents.append((racktables_device_id, object_name, label, asset_no, comment))
 
     return not_created_parents
 
