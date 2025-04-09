@@ -5,7 +5,7 @@ from slugify import slugify
 
 from racktables_netbox_migration.utils import get_db_connection, get_cursor
 from racktables_netbox_migration.db import getTags
-from racktables_netbox_migration.config import TARGET_SITE
+from racktables_netbox_migration.config import TARGET_SITE, TARGET_SITE_ID
 
 def create_vms(netbox, create_mounted=True, create_unmounted=True):
     """
@@ -29,29 +29,9 @@ def create_vms(netbox, create_mounted=True, create_unmounted=True):
     
     # Site filtering for clusters
     site_filter = {}
-    if TARGET_SITE:
-        # Updated to handle both RecordSet and list return types
-        try:
-            sites = netbox.dcim.get_sites(name=TARGET_SITE)
-            
-            # Convert RecordSet to list if needed
-            if hasattr(sites, 'results'):
-                sites = sites.results
-            
-            # Ensure we have a list to work with
-            if not isinstance(sites, list):
-                sites = list(sites)
-            
-            if sites:
-                # Extract site ID safely
-                site = sites[0]
-                site_id = site['id'] if isinstance(site, dict) else site
-                site_filter = {"site": site_id}
-                print(f"Filtering VMs by site: {TARGET_SITE}")
-            else:
-                print(f"Warning: No site found with name {TARGET_SITE}")
-        except Exception as e:
-            print(f"Error processing site filter: {e}")
+    if TARGET_SITE_ID:
+        site_filter = {"site": TARGET_SITE_ID}
+        print(f"Filtering VMs by site ID: {TARGET_SITE_ID}")
     
     # Create VMs in clusters if enabled
     if create_mounted:
