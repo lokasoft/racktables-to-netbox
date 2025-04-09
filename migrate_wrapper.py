@@ -10,12 +10,20 @@ extensions applied.
 import os
 import sys
 import importlib.util
+import argparse
 from custom_netbox import NetBoxWrapper
 
 # Keep the original environment
 original_env = dict(os.environ)
 
-def run_migration():
+def parse_arguments():
+    """Parse command line arguments for the migration script"""
+    parser = argparse.ArgumentParser(description='Migrate data from Racktables to NetBox')
+    parser.add_argument('--site', type=str, help='Target site name to restrict migration to')
+    parser.add_argument('--config', type=str, help='Path to configuration file')
+    return parser.parse_args()
+
+def run_migration(args):
     """Run the migration script with the updated NetBox wrapper class"""
     print("Starting Racktables to NetBox migration with enhanced NetBox library...")
     
@@ -31,6 +39,12 @@ def run_migration():
     try:
         # Execute the migrate_additional module
         spec.loader.exec_module(migrate_additional)
+        
+        # Set the target site if specified
+        if args.site:
+            print(f"Target site specified: {args.site}")
+            # Set the TARGET_SITE variable in the migrate module
+            migrate_additional.TARGET_SITE = args.site
         
         print("Migration completed successfully!")
         return True
@@ -51,6 +65,9 @@ def run_migration():
         os.environ.update(original_env)
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    args = parse_arguments()
+    
     # First run set_custom_fields.py to ensure all custom fields are created
     print("Setting up custom fields...")
     custom_fields_spec = importlib.util.spec_from_file_location("set_custom_fields", "set_custom_fields.py")
@@ -58,7 +75,7 @@ if __name__ == "__main__":
     custom_fields_spec.loader.exec_module(custom_fields)
     
     # Run the migration
-    success = run_migration()
+    success = run_migration(args)
     
     # Exit with appropriate code
     sys.exit(0 if success else 1)
