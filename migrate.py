@@ -902,7 +902,7 @@ with get_db_connection() as connection:
                     vlan_domain_id_names[Id] = description
 
                     if description not in existing_vlan_groups:
-                        netbox.ipam.create_vlan_group(name=description, slug=slugify(description), custom_fields= {"VLAN_Domain_ID":Id})
+                        netbox.ipam.create_vlan_group(name=description, slug=slugify(description), custom_fields= {"VLAN_Domain_ID": str(Id)})
                         existing_vlan_groups.add(description)
 
     # Map the racktables network id to the vlan group and vlan names
