@@ -10,6 +10,7 @@ class NetBoxWrapper:
     """
     Wrapper class that provides compatibility with the original python-netbox library
     by adapting the pynetbox interface to match the expected methods and structure.
+    Extended to support additional Racktables tables.
     """
     
     def __init__(self, host, port=None, use_ssl=True, auth_token=None):
@@ -170,6 +171,20 @@ class DcimWrapper:
             user=user,
             **kwargs
         )
+        
+    def create_cable(self, termination_a_id, termination_b_id, termination_a_type, termination_b_type, **kwargs):
+        """Create a new cable"""
+        data = {
+            "termination_a_type": termination_a_type,
+            "termination_a_id": termination_a_id,
+            "termination_b_type": termination_b_type,
+            "termination_b_id": termination_b_id
+        }
+        return self.nb.dcim.cables.create(**data, **kwargs)
+        
+    def get_cables(self, **kwargs):
+        """Get cables with optional filters"""
+        return self.nb.dcim.cables.filter(**kwargs)
 
 
 class IpamWrapper:
@@ -242,6 +257,24 @@ class IpamWrapper:
         if 'tag' in kwargs:
             return self.nb.ipam.ip_addresses.filter(tag=kwargs['tag'])
         return self.nb.ipam.ip_addresses.filter(**kwargs)
+        
+    def create_service(self, device, name, ports, protocol, **kwargs):
+        """Create a new service"""
+        # Handle device if it's a string
+        if isinstance(device, str):
+            device = self.nb.dcim.devices.get(name=device)
+            
+        return self.nb.ipam.services.create(
+            device=device.id if hasattr(device, 'id') else device,
+            name=name,
+            ports=ports,
+            protocol=protocol,
+            **kwargs
+        )
+        
+    def get_services(self, **kwargs):
+        """Get services with optional filters"""
+        return self.nb.ipam.services.filter(**kwargs)
 
 
 class VirtualizationWrapper:
@@ -305,6 +338,20 @@ class VirtualizationWrapper:
     def get_interfaces(self, **kwargs):
         """Get VM interfaces with optional filters"""
         return self.nb.virtualization.interfaces.filter(**kwargs)
+        
+    def create_service(self, virtual_machine, name, ports, protocol, **kwargs):
+        """Create a new service for a VM"""
+        # Handle VM if it's a string
+        if isinstance(virtual_machine, str):
+            virtual_machine = self.nb.virtualization.virtual_machines.get(name=virtual_machine)
+            
+        return self.nb.ipam.services.create(
+            virtual_machine=virtual_machine.id if hasattr(virtual_machine, 'id') else virtual_machine,
+            name=name,
+            ports=ports,
+            protocol=protocol,
+            **kwargs
+        )
 
 
 class ExtrasWrapper:
@@ -320,6 +367,32 @@ class ExtrasWrapper:
     def get_tags(self, **kwargs):
         """Get tags with optional filters"""
         return self.nb.extras.tags.filter(**kwargs)
+        
+    def create_custom_field(self, name, type, **kwargs):
+        """Create a new custom field"""
+        return self.nb.extras.custom_fields.create(name=name, type=type, **kwargs)
+        
+    def get_custom_fields(self, **kwargs):
+        """Get custom fields with optional filters"""
+        return self.nb.extras.custom_fields.filter(**kwargs)
+        
+    def create_export_template(self, name, content_type, template_code, **kwargs):
+        """Create a new export template"""
+        return self.nb.extras.export_templates.create(
+            name=name,
+            content_type=content_type,
+            template_code=template_code,
+            **kwargs
+        )
+        
+    def create_object_change(self, changed_object_type, changed_object_id, action, **kwargs):
+        """Create a record of an object change"""
+        return self.nb.extras.object_changes.create(
+            changed_object_type=changed_object_type,
+            changed_object_id=changed_object_id,
+            action=action,
+            **kwargs
+        )
 
 
 # Create a replacement for the original NetBox class
