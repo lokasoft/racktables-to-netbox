@@ -32,11 +32,11 @@ if grep -q "^MAX_PAGE_SIZE=" "$NETBOX_ENV_FILE"; then
             read -p "Do you want to restart NetBox now? (y/n): " restart_now
             if [[ $restart_now == "y" || $restart_now == "Y" ]]; then
                 echo "Restarting NetBox..."
-                cd "$NETBOX_DOCKER_PATH" && docker-compose restart netbox
+                cd "$NETBOX_DOCKER_PATH" && docker compose restart netbox
                 echo "✅ NetBox has been restarted"
             else
                 echo "⚠️ Remember to restart NetBox manually:"
-                echo "cd $NETBOX_DOCKER_PATH && docker-compose restart netbox"
+                echo "cd $NETBOX_DOCKER_PATH && docker compose restart netbox"
             fi
         else
             echo "MAX_PAGE_SIZE left unchanged at: $current_value"
@@ -54,11 +54,11 @@ else
         read -p "Do you want to restart NetBox now? (y/n): " restart_now
         if [[ $restart_now == "y" || $restart_now == "Y" ]]; then
             echo "Restarting NetBox..."
-            cd "$NETBOX_DOCKER_PATH" && docker-compose restart netbox
+            cd "$NETBOX_DOCKER_PATH" && docker compose restart netbox
             echo "✅ NetBox has been restarted"
         else
             echo "⚠️ Remember to restart NetBox manually:"
-            echo "cd $NETBOX_DOCKER_PATH && docker-compose restart netbox"
+            echo "cd $NETBOX_DOCKER_PATH && docker compose restart netbox"
         fi
     else
         echo "MAX_PAGE_SIZE setting not added"
