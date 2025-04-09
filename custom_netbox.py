@@ -10,7 +10,6 @@ class NetBoxWrapper:
     """
     Wrapper class that provides compatibility with the original python-netbox library
     by adapting the pynetbox interface to match the expected methods and structure.
-    Extended to support additional Racktables tables.
     """
     
     def __init__(self, host, port=None, use_ssl=True, auth_token=None):
