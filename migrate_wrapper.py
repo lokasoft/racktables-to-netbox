@@ -11,7 +11,7 @@ import os
 import sys
 import importlib.util
 import argparse
-from custom_netbox import NetBoxWrapper
+from custom_netbox import NetBox
 
 # Keep the original environment
 original_env = dict(os.environ)
@@ -35,17 +35,11 @@ def run_migration(args):
     extended_spec = importlib.util.spec_from_file_location("extended_migrate", "extended_migrate.py")
     extended_migrate = importlib.util.module_from_spec(extended_spec)
     
-    # Create a global variable 'NetBox' in the builtins
-    # This simulates having 'from netbox import NetBox' available everywhere
-    import builtins
-    builtins.NetBox = NetBoxWrapper
-    
     try:
         # Set the target site if specified
         if args.site:
             print(f"Target site specified: {args.site}")
             # Import the config module to set TARGET_SITE
-            from racktables_netbox_migration.config import TARGET_SITE
             import racktables_netbox_migration.config as config
             config.TARGET_SITE = args.site
         
@@ -63,10 +57,6 @@ def run_migration(args):
         return False
         
     finally:
-        # Clean up the global we added
-        if hasattr(builtins, 'NetBox'):
-            delattr(builtins, 'NetBox')
-        
         # Restore original environment
         os.environ.clear()
         os.environ.update(original_env)
