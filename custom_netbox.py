@@ -50,30 +50,28 @@ class DcimWrapper:
         # Handle nested attributes
         if 'manufacturer' in kwargs and isinstance(kwargs['manufacturer'], dict):
             kwargs['manufacturer'] = kwargs['manufacturer']['name']
-            
         if 'rack' in kwargs and isinstance(kwargs['rack'], dict):
             kwargs['rack'] = kwargs['rack']['name']
-            
         if 'cluster' in kwargs and isinstance(kwargs['cluster'], dict):
             kwargs['cluster'] = kwargs['cluster']['name']
-            
         # Get site ID from name if needed
         site = self.nb.dcim.sites.get(name=site_name)
-        
         # Get device role and type if they're strings
         if isinstance(device_role, str):
             device_role = self.nb.dcim.device_roles.get(name=device_role)
-        
         if isinstance(device_type, str):
             device_type = self.nb.dcim.device_types.get(model=device_type)
-            
-        return self.nb.dcim.devices.create(
-            name=name,
-            device_type=device_type.id if hasattr(device_type, 'id') else device_type,
-            device_role=device_role.id if hasattr(device_role, 'id') else device_role,
-            site=site.id if site else site_name,
-            **kwargs
-        )
+    
+        # Set up parameters for the call
+        params = {
+            'name': name,
+            'device_type': device_type.id if hasattr(device_type, 'id') else device_type,
+            'role': device_role.id if hasattr(device_role, 'id') else device_role, # Changed from device_role to role
+            'site': site.id if site else site_name
+        }
+    
+        # Add any additional keyword arguments
+        params.update(kwargs)
     
     def create_device_role(self, name, color, slug, **kwargs):
         """Create a new device role"""
