@@ -11,7 +11,11 @@ Before starting, ensure you have:
 3. A running NetBox instance (version 4.2.6 or higher) with API access
 4. Administrative privileges on the NetBox instance to add custom fields
 
-## Installation Steps
+## Installation Methods
+
+You can install and run this tool in two ways:
+1. **Development Mode**: Run directly from the cloned repository (recommended for testing)
+2. **Production Mode**: Install as a Python package (recommended for production use)
 
 ### 1. Clone the Repository
 
@@ -57,15 +61,37 @@ pipx run --pip-args="-r requirements.txt" python -c ""
 
 ### 3. Install Dependencies
 
-If using a virtual environment (Option A):
+With your virtual environment activated (if using Option A):
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If using pipx (Option B), the dependencies are already installed from the previous step.
+### 4. Choose Your Installation Method
 
-### 4. Configure NetBox MAX_PAGE_SIZE Setting
+#### Development Mode (Run Directly)
+
+This allows you to run the tool directly from the cloned repository without installing it as a package:
+
+```bash
+# No additional installation steps needed
+# You can run the scripts directly
+python migrate_wrapper.py --site "YourSiteName"
+```
+
+#### Production Mode (Install as Package)
+
+Install the package in development mode to make it accessible system-wide:
+
+```bash
+# Install in development mode (editable)
+pip install -e .
+
+# Or install normally
+pip install .
+```
+
+### 5. Configure NetBox MAX_PAGE_SIZE Setting
 
 This setting is required for the migration tool to properly fetch all objects in a single request.
 
@@ -82,7 +108,7 @@ chmod +x scripts/max-page-size-check.sh
 
 This will check if the MAX_PAGE_SIZE is already set to 0 and offer to update it if needed.
 
-### 5. Configure NetBox Custom Fields
+### 6. Configure NetBox Custom Fields
 
 The migration tool requires specific custom fields to be added to your NetBox instance. Use the provided script to automatically create all required fields:
 
@@ -96,9 +122,9 @@ python scripts/set_custom_fields.py
 
 Alternatively, you can add custom fields manually using NetBox's UI according to the definitions in `scripts/set_custom_fields.py`.
 
-### 6. Configure Database and API Connection
+### 7. Configure Database and API Connection
 
-Edit `config.py` to set your connection parameters:
+Edit `racktables_netbox_migration/config.py` to set your connection parameters:
 
 ```python
 # NetBox API connection settings
@@ -119,7 +145,7 @@ DB_CONFIG = {
 }
 ```
 
-### 7. Test Database Connection
+### 8. Test Database Connection
 
 Before running the full migration, test your database connection:
 
@@ -132,11 +158,10 @@ print("Connection successful!")
 connection.close()
 ```
 
-### 8. Run the Migration
+### 9. Run the Migration
 
 Run the wrapper script to perform the migration:
 
-If using a virtual environment:
 ```bash
 python migrate_wrapper.py
 ```
@@ -155,7 +180,14 @@ python extended_migrate.py
 
 ### Common Issues
 
-1. **Externally Managed Environment Error**
+1. **ModuleNotFoundError: No module named 'racktables_netbox_migration'**
+   
+   This usually means the package isn't in your Python path. Solutions:
+   - Make sure you're running from the repository root directory
+   - If using development mode, the modified migrate_wrapper.py handles this
+   - If using production mode, ensure you've installed the package with `pip install -e .`
+
+2. **Externally Managed Environment Error**
    
    If you see an error like:
    ```
@@ -165,7 +197,7 @@ python extended_migrate.py
    
    This means you need to use a virtual environment or pipx as described in the installation steps.
 
-2. **Database Connection Issues**
+3. **Database Connection Issues**
    
    If you encounter database connection problems, check:
    - Database credentials in `config.py`
@@ -175,7 +207,7 @@ python extended_migrate.py
    
    Try connecting with a MySQL client to verify credentials.
 
-3. **NetBox API Connection Issues**
+4. **NetBox API Connection Issues**
    
    If you have problems connecting to NetBox:
    - Verify the API token is valid and has appropriate permissions
@@ -189,7 +221,7 @@ python extended_migrate.py
    curl -H "Authorization: Token YOUR_TOKEN" http://your-netbox-host:port/api/
    ```
 
-4. **Missing Custom Fields**
+5. **Missing Custom Fields**
    
    If data isn't being correctly migrated because of missing custom fields:
    - Check if custom fields were properly added to NetBox
@@ -198,7 +230,7 @@ python extended_migrate.py
    - Check the output of the set_custom_fields.py script for errors
    - Verify permissions for the API token include custom field management
 
-5. **Memory or Performance Issues**
+6. **Memory or Performance Issues**
    
    If the script runs out of memory or is too slow:
    - Try running parts of the migration by adjusting the boolean flags in `config.py`
@@ -207,7 +239,7 @@ python extended_migrate.py
    - Consider filtering by site with the `--site` parameter
    - Break the migration into smaller batches using the config flags
 
-6. **Import Errors**
+7. **Import Errors**
    
    If you see import errors:
    - Make sure you're running the scripts from the repository root directory
