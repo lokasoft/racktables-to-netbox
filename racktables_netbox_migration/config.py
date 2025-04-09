@@ -31,6 +31,7 @@ CREATE_AVAILABLE_SUBNETS =     True
 
 # Site filtering - set to None to process all sites, or specify a site name to restrict migration
 TARGET_SITE = None  # This can be set by migrate_wrapper.py via command line args
+TARGET_SITE_ID = None  # Store the numeric ID of the target site
 
 # Whether to store cached data with pickle
 STORE_DATA = False
