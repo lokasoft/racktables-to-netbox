@@ -394,3 +394,5 @@ class ExtrasWrapper:
 
 # Create a replacement for the original NetBox class
 ExtendedNetBox = NetBoxWrapper
+# Make it available as NetBox for existing code
+NetBox = ExtendedNetBox
