@@ -31,6 +31,12 @@ if [ ! -d "racktables_netbox_migration/extended/__init__.py" ]; then
     echo '"""Extended migration components"""' > racktables_netbox_migration/extended/__init__.py
 fi
 
+# Install package locally
+pip install -e .
+
+# Goto package dir
+cd racktables_netbox_migration
+
 echo "Development environment setup complete!"
 echo "You can now run migrate_wrapper.py directly:"
 echo "python migrate_wrapper.py [--site SITE_NAME]"
