@@ -20,6 +20,25 @@ from migration.utils import *
 from migration.db import *
 from migration.custom_netbox import NetBox
 
+def check_config():
+    """Verify configuration is not using defaults"""
+    default_token = "0123456789abcdef0123456789abcdef01234567"
+    if NB_TOKEN == default_token:
+        logging.error("Default API token detected in config.py")
+        logging.error("Please update migration/config.py with your NetBox configuration")
+        return False
+    
+    if DB_CONFIG['password'] == 'secure-password':
+        logging.error("Default database password detected in config.py")
+        logging.error("Please update migration/config.py with your database credentials")
+        return False
+    
+    if NB_HOST == "localhost" and NB_PORT == 8000:
+        logging.warning("Using default NetBox connection settings (localhost:8000)")
+        logging.warning("If this is not your actual NetBox server, update migration/config.py")
+    
+    return True
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Migrate data from Racktables to NetBox')
@@ -192,6 +211,19 @@ def main():
             logging.error(f"Config file not found: {args.config}")
             return False
     
+    # Verify configuration is not using defaults
+    if not check_config():
+        return False
+    
+    # Attempt database connection
+    try:
+        logging.info("Testing database connection...")
+        with get_db_connection() as connection:
+            logging.info("Database connection successful")
+    except Exception as e:
+        logging.error(f"Database connection failed: {e}")
+        return False
+    
     # Set up custom fields if not skipped
     if not args.skip_custom_fields:
         logging.info("Setting up custom fields...")
@@ -200,7 +232,11 @@ def main():
     
     # Initialize NetBox connection
     logging.info("Initializing NetBox connection...")
-    netbox = NetBox(host=NB_HOST, port=NB_PORT, use_ssl=NB_USE_SSL, auth_token=NB_TOKEN)
+    try:
+        netbox = NetBox(host=NB_HOST, port=NB_PORT, use_ssl=NB_USE_SSL, auth_token=NB_TOKEN)
+    except Exception as e:
+        logging.error(f"Failed to initialize NetBox connection: {e}")
+        return False
     
     # Verify site exists
     if not verify_site_exists(netbox, TARGET_SITE):
