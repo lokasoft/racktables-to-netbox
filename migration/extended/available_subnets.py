@@ -28,16 +28,15 @@ def create_available_prefixes(netbox):
     existing_prefixes = netbox.ipam.get_ip_prefixes()
     parent_prefixes = []
     
-    # Filter to find prefixes that could be parents (not too small)
+    # Get all possible parent prefixes - don't filter too strictly
     for p in existing_prefixes:
         try:
-            # Check if prefix attribute exists and has a value
             if not hasattr(p, 'prefix') or not p.prefix:
                 continue
                 
             network = ipaddress.ip_network(p.prefix)
             
-            # Consider only IPv4 prefixes up to /24
+            # Include all IPv4 networks with less than /24 mask
             if isinstance(network, ipaddress.IPv4Network) and network.prefixlen < 24:
                 parent_prefixes.append(p)
         except Exception as e:
@@ -47,91 +46,58 @@ def create_available_prefixes(netbox):
     print(f"Found {len(parent_prefixes)} potential parent prefixes")
     available_count = 0
     
-    # Process parent prefixes in batches to avoid overwhelming the API
-    batch_size = 10
-    max_prefixes_per_parent = 5
-    min_prefix_size = 16  # Only create prefixes of this size or larger
-    
-    for i in range(0, len(parent_prefixes), batch_size):
-        batch = parent_prefixes[i:i+batch_size]
+    # Process each parent to find available subnets
+    for parent in parent_prefixes:
+        parent_id = parent.id
+        parent_prefix = parent.prefix
         
-        for parent in batch:
-            parent_id = parent.id
-            parent_prefix = parent.prefix
+        # Get available prefixes from API
+        available_url = f"{api_url}/ipam/prefixes/{parent_id}/available-prefixes/"
+        
+        try:
+            response = requests.get(
+                available_url, 
+                headers=headers,
+                verify=NB_USE_SSL
+            )
             
-            # Skip if the parent already has attributes set
-            has_description = bool(getattr(parent, 'description', '').strip())
-            has_vrf = getattr(parent, 'vrf', None) is not None
-            has_role = getattr(parent, 'role', None) is not None
-            has_tenant = getattr(parent, 'tenant', None) is not None
-            has_other_tags = False
-            has_prefix_name = False
-            
-            # Check custom fields for Prefix_name
-            custom_fields = getattr(parent, 'custom_fields', {})
-            if isinstance(custom_fields, dict) and custom_fields.get('Prefix_Name'):
-                has_prefix_name = True
-            
-            for tag in getattr(parent, 'tags', []):
-                if hasattr(tag, 'name') and tag.name != 'Available' and tag.name != 'Auto-Generated' and tag.name != 'API-Detected':
-                    has_other_tags = True
-                    break
-                    
-            # If parent has any fields populated, it's not available for subdivision
-            if has_description or has_vrf or has_role or has_tenant or has_other_tags or has_prefix_name:
+            if response.status_code != 200:
+                error_log(f"Error getting available prefixes for {parent_prefix}: {response.text}")
                 continue
                 
-            # Get available prefixes from API
-            available_url = f"{api_url}/ipam/prefixes/{parent_id}/available-prefixes/"
+            available_prefixes = response.json()
+            if not available_prefixes:
+                continue
             
-            try:
-                response = requests.get(
-                    available_url, 
-                    headers=headers,
-                    verify=NB_USE_SSL
-                )
+            # Process found available prefixes
+            prefix_count = 0
+            for available in available_prefixes:
+                prefix_str = available['prefix']
+                prefix_obj = ipaddress.ip_network(prefix_str)
                 
-                if response.status_code != 200:
-                    error_log(f"Error getting available prefixes for {parent_prefix}: {response.text}")
+                # Skip very small subnets
+                if prefix_obj.prefixlen > 28 and isinstance(prefix_obj, ipaddress.IPv4Network):
                     continue
                     
-                available_prefixes = response.json()
-                
-                # Filter prefixes - select larger prefixes first
-                sorted_prefixes = sorted(
-                    available_prefixes,
-                    key=lambda p: ipaddress.ip_network(p['prefix']).prefixlen
-                )
-                
-                # Only create a limited number of prefixes per parent
-                prefix_count = 0
-                for available in sorted_prefixes:
-                    prefix_str = available['prefix']
-                    prefix_obj = ipaddress.ip_network(prefix_str)
+                # Create the available prefix
+                try:
+                    netbox.ipam.create_ip_prefix(
+                        prefix=prefix_str,
+                        status="reserved",
+                        tags=[{'name': 'Available'}]
+                    )
+                    available_count += 1
+                    print(f"Created available prefix: {prefix_str}")
                     
-                    # Only create larger prefixes
-                    if prefix_obj.prefixlen > min_prefix_size:
-                        continue
+                    prefix_count += 1
+                    if prefix_count >= 5:  # Limit per parent
+                        break
                         
-                    # Create the available prefix
-                    try:
-                        netbox.ipam.create_ip_prefix(
-                            prefix=prefix_str,
-                            status="reserved",
-                            tags=[{'name': 'Available'}]
-                        )
-                        available_count += 1
-                        print(f"Created available prefix: {prefix_str}")
+                except Exception as e:
+                    error_log(f"Error creating available prefix {prefix_str}: {str(e)}")
                         
-                        prefix_count += 1
-                        if prefix_count >= max_prefixes_per_parent:
-                            break
-                            
-                    except Exception as e:
-                        error_log(f"Error creating available prefix {prefix_str}: {str(e)}")
-                        
-            except Exception as e:
-                error_log(f"Error processing parent prefix {parent_prefix}: {str(e)}")
+        except Exception as e:
+            error_log(f"Error processing parent prefix {parent_prefix}: {str(e)}")
                 
     print(f"Created {available_count} available subnet prefixes using API")
 
