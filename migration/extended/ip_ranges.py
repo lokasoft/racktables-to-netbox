@@ -5,6 +5,70 @@ import ipaddress
 from migration.utils import error_log
 from migration.config import TARGET_SITE, IPV4_TAG, IPV6_TAG
 
+def create_ip_ranges_from_available_prefixes(netbox):
+    """
+    Create IP ranges from available prefixes
+    
+    Args:
+        netbox: NetBox client instance
+    """
+    print("\nCreating IP ranges from available prefixes...")
+    
+    # Get all available prefixes
+    available_prefixes = netbox.ipam.get_ip_prefixes(status='available')
+    print(f"Found {len(available_prefixes)} available prefixes")
+    
+    # Get existing IP ranges to avoid duplicates
+    existing_ranges = netbox.ipam.get_ip_ranges()
+    existing_range_cidrs = set()
+    for ip_range in existing_ranges:
+        if ip_range['start_address'] and ip_range['end_address']:
+            start_ip = ip_range['start_address'].split('/')[0]
+            end_ip = ip_range['end_address'].split('/')[0]
+            existing_range_cidrs.add(f"{start_ip}-{end_ip}")
+    
+    ranges_created = 0
+    
+    for prefix in available_prefixes:
+        prefix_str = prefix['prefix']
+        prefix_obj = ipaddress.ip_network(prefix_str)
+        
+        # Skip very small prefixes
+        if prefix_obj.prefixlen >= 30 and isinstance(prefix_obj, ipaddress.IPv4Network):
+            continue
+            
+        # Check if this was created from API detection
+        api_detected = False
+        for tag in prefix.get('tags', []):
+            if tag['name'] == 'API-Detected':
+                api_detected = True
+                break
+                
+        # Create an IP range for the whole prefix
+        start_ip = prefix_obj.network_address
+        end_ip = prefix_obj.broadcast_address
+        range_cidr = f"{start_ip}-{end_ip}"
+        
+        if range_cidr not in existing_range_cidrs:
+            try:
+                source_tag = "API-Detected" if api_detected else "Auto-Generated"
+                description = f"Available IP range for {prefix_str}"
+                ip_range = netbox.ipam.create_ip_range(
+                    start_address=str(start_ip),
+                    end_address=str(end_ip),
+                    status="available",
+                    description=description,
+                    tags=[{"name": "Available"}, {"name": source_tag}, 
+                          {"name": IPV4_TAG if isinstance(prefix_obj, ipaddress.IPv4Network) else IPV6_TAG}]
+                )
+                existing_range_cidrs.add(range_cidr)
+                ranges_created += 1
+                print(f"Created IP range for available prefix: {start_ip} - {end_ip}")
+            except Exception as e:
+                error_log(f"Error creating IP range {start_ip} - {end_ip}: {str(e)}")
+    
+    print(f"Created {ranges_created} IP ranges from available prefixes")
+
 def create_ip_ranges(netbox):
     """
     Create IP ranges from IP prefixes and addresses
