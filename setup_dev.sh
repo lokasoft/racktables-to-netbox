@@ -233,7 +233,24 @@ setup_gitclone() {
     
     # Install dependencies and development mode
     echo "Installing dependencies..."
-    pip install -r requirements.txt
+    pip install --upgrade pip
+    
+    # Install all requirements
+    pip install -r requirements.txt --no-cache-dir
+    
+    # Force install each package from requirements.txt
+    while read package; do
+        # Skip empty lines and comments
+        [[ -z "$package" || "$package" =~ ^# ]] && continue
+        
+        # Extract package name without version specifiers
+        pkg_name=$(echo "$package" | sed -E 's/([a-zA-Z0-9_.-]+).*/\1/')
+        
+        echo "Force installing $pkg_name..."
+        pip install --force-reinstall "$pkg_name"
+        
+    done < requirements.txt
+    
     echo "Installing package in development mode..."
     pip install -e .
     
