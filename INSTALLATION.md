@@ -11,11 +11,66 @@ Before starting, ensure you have:
 3. A running NetBox instance (version 4.2.6 or higher) with API access
 4. Administrative privileges on the NetBox instance to add custom fields
 
-## Installation Methods
+## Automated Setup (Recommended)
 
-You can install and run this tool in two ways:
-1. **Direct Execution** (recommended for most users)
-2. **Package Installation** (optional, for system-wide installation)
+The tool includes a setup script that automates the installation process:
+
+```bash
+# Clone the repository
+git clone https://github.com/enoch85/racktables-to-netbox.git
+cd racktables-to-netbox
+
+# Make the setup script executable
+chmod +x setup_dev.sh
+
+# Run automated setup
+./setup_dev.sh
+```
+
+The `setup_dev.sh` script has several options:
+
+- `--netbox`: Sets up a complete NetBox Docker environment with proper configuration
+- `--gitclone`: Configures minimal requirements after a git clone (default if no options specified)
+- `--package`: Sets up for package distribution
+- `--help`: Displays help message
+
+For a complete setup with NetBox included:
+
+```bash
+./setup_dev.sh --netbox
+```
+
+This will:
+1. Set up a virtual environment
+2. Install all dependencies
+3. Create a NetBox Docker installation with proper configuration
+4. Generate secure credentials
+5. Configure NetBox with MAX_PAGE_SIZE set to 0
+6. Create symlinks for development
+7. Save configuration for easy use
+
+## Quick Manual Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/enoch85/racktables-to-netbox.git
+cd racktables-to-netbox
+
+# Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure connection settings in migration/config.py or use environment variables
+# (See Configuration section below)
+
+# Run the migration
+python migrate.py --site "YourSiteName"  # Optional site filtering
+```
+
+## Detailed Installation Steps
 
 ### 1. Clone the Repository
 
@@ -67,38 +122,7 @@ With your virtual environment activated (if using Option A):
 pip install -r requirements.txt
 ```
 
-### 4. Choose Your Installation Method
-
-#### Direct Execution (Recommended)
-
-This allows you to run the tool directly from the cloned repository:
-
-```bash
-# No installation needed - just run migrate.py with Python
-python migrate.py --site "YourSiteName"
-
-# Optional arguments
-python migrate.py --basic-only  # Run only basic migration
-python migrate.py --extended-only  # Run only extended components
-python migrate.py --skip-custom-fields  # Skip custom fields setup
-```
-
-#### Package Installation (Optional)
-
-Only necessary if you want the tool available system-wide:
-
-```bash
-# Install in development mode (editable)
-pip install -e .
-
-# Or install normally
-pip install .
-
-# Then run using the command
-migrate-racktables --site "YourSiteName"
-```
-
-### 5. Configure NetBox MAX_PAGE_SIZE Setting
+### 4. Configure NetBox MAX_PAGE_SIZE Setting
 
 This setting is required for the migration tool to properly fetch all objects in a single request.
 
@@ -115,7 +139,7 @@ chmod +x scripts/max-page-size-check.sh
 
 This will check if the MAX_PAGE_SIZE is already set to 0 and offer to update it if needed.
 
-### 6. Configure Database and API Connection
+### 5. Configure Database and API Connection
 
 Edit `migration/config.py` to set your connection parameters:
 
@@ -155,33 +179,14 @@ export RACKTABLES_DB_PASSWORD=secure-password
 export RACKTABLES_DB_NAME=test1
 ```
 
-### 7. Test Database Connection
+### 6. Run the Migration
 
-Before running the full migration, test your database connection:
-
-```python
-import pymysql
-from migration.config import DB_CONFIG
-
-connection = pymysql.connect(**DB_CONFIG)
-print("Connection successful!")
-connection.close()
-```
-
-### 8. Run the Migration
-
-Run the migration script:
-
-```bash
-python migrate.py
-```
-
-If you want to restrict migration to a specific site:
+Basic usage with a specific site:
 ```bash
 python migrate.py --site "YourSiteName"
 ```
 
-You can also run specific parts of the migration:
+Other migration options:
 ```bash
 # Run only basic migration (no extended components)
 python migrate.py --basic-only
@@ -191,6 +196,24 @@ python migrate.py --extended-only
 
 # Skip setting up custom fields
 python migrate.py --skip-custom-fields
+
+# Use custom configuration file
+python migrate.py --config your_config.py
+```
+
+## Package Installation (Optional)
+
+Only necessary if you want the tool available system-wide:
+
+```bash
+# Install in development mode (editable)
+pip install -e .
+
+# Or install normally
+pip install .
+
+# Then run using the command
+migrate-racktables --site "YourSiteName"
 ```
 
 ## Troubleshooting
@@ -214,23 +237,13 @@ python migrate.py --skip-custom-fields
    - Check network connectivity to the NetBox server
    - Ensure the API is enabled in NetBox settings
    - Confirm your NetBox version is 4.2.6 or higher
-   - Check if you can access the API in a browser or with curl
    
    Test with a simple API call:
    ```bash
    curl -H "Authorization: Token YOUR_TOKEN" http://your-netbox-host:port/api/
    ```
 
-3. **Missing Custom Fields**
-   
-   If data isn't being correctly migrated because of missing custom fields:
-   - Check if custom fields were properly added to NetBox
-   - Verify field names match those expected in the script
-   - Restart NetBox after adding custom fields
-   - Check the output of the set_custom_fields.py script for errors
-   - Verify permissions for the API token include custom field management
-
-4. **Memory or Performance Issues**
+3. **Memory or Performance Issues**
    
    If the script runs out of memory or is too slow:
    - Try running parts of the migration by adjusting the boolean flags in `config.py`
@@ -249,20 +262,36 @@ After migration completes, verify:
 5. Parent-child relationships are maintained
 6. Custom fields are populated with the right data
 
-To check for missing data, you can use the NetBox UI or API to browse the migrated data and compare with your Racktables instance.
+## Setup Script Details
 
-## Additional Information
+The included `setup_dev.sh` script provides several useful features:
 
-### Configuration Options
+### Setting up NetBox (`--netbox`)
 
-You can configure the migration tool using:
+When run with the `--netbox` option, the script:
+- Generates secure credentials for NetBox and PostgreSQL
+- Clones the NetBox Docker repository
+- Creates a Docker Compose override with proper settings
+- Sets MAX_PAGE_SIZE=0 required for migration
+- Creates admin user and API token
+- Configures the migration tool to use the local NetBox
 
-1. Environment variables (see section 6)
-2. Command line arguments (see section 8)
-3. Direct edits to the `migration/config.py` file
-4. Custom configuration file: `python migrate.py --config your_config.py`
+### Basic Setup (`--gitclone`)
 
-### Getting Help
+This is the default mode and sets up:
+- Python virtual environment
+- Required dependencies
+- Symlinks for development
+- Package in development mode
+
+### Packaging (`--package`) 
+
+Sets up the environment for creating distributable packages:
+- Builds Python package
+- Creates necessary packaging files
+- Prepares for distribution via PyPI
+
+## Getting Help
 
 If you encounter issues not covered in this guide:
 
