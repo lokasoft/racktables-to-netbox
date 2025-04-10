@@ -2,8 +2,8 @@
 Global configuration settings for the Racktables to NetBox migration tool
 """
 from pymysql.cursors import DictCursor
-import ipaddress
 import os
+import ipaddress
 
 # Migration flags - control which components are processed
 CREATE_VLAN_GROUPS =           True
@@ -30,7 +30,7 @@ CREATE_MONITORING_DATA =       True
 CREATE_AVAILABLE_SUBNETS =     True
 
 # Site filtering - set to None to process all sites, or specify a site name to restrict migration
-TARGET_SITE = None  # This can be set by migrate_wrapper.py via command line args
+TARGET_SITE = None  # This can be set via command line args
 TARGET_SITE_ID = None  # Store the numeric ID of the target site
 
 # Whether to store cached data with pickle
@@ -46,19 +46,19 @@ FIRST_ASCII_CHARACTER = " "
 IPV4_TAG = "IPv4"
 IPV6_TAG = "IPv6"
 
-# NetBox API connection settings
-NB_HOST = 'localhost'
-NB_PORT = 8000
-NB_TOKEN = '0123456789abcdef0123456789abcdef01234567'
-NB_USE_SSL = False
+# NetBox API connection settings - can be overridden with environment variables
+NB_HOST = os.environ.get('NETBOX_HOST', 'localhost')
+NB_PORT = int(os.environ.get('NETBOX_PORT', '8000'))
+NB_TOKEN = os.environ.get('NETBOX_TOKEN', '0123456789abcdef0123456789abcdef01234567')
+NB_USE_SSL = os.environ.get('NETBOX_USE_SSL', 'False').lower() in ('true', '1', 'yes')
 
-# Database connection parameters
+# Database connection parameters - can be overridden with environment variables
 DB_CONFIG = {
-    'host': '10.248.48.4',
-    'port': 3306,
-    'user': 'root',
-    'password': 'secure-password',
-    'db': 'test1',
+    'host': os.environ.get('RACKTABLES_DB_HOST', '10.248.48.4'),
+    'port': int(os.environ.get('RACKTABLES_DB_PORT', '3306')),
+    'user': os.environ.get('RACKTABLES_DB_USER', 'root'),
+    'password': os.environ.get('RACKTABLES_DB_PASSWORD', 'secure-password'),
+    'db': os.environ.get('RACKTABLES_DB_NAME', 'test1'),
     'charset': 'utf8mb4',
     'cursorclass': DictCursor
 }
@@ -145,3 +145,9 @@ INTERFACE_NAME_MAPPINGS = {
 
 # Global data collections
 PARENT_OBJTYPE_IDS = [pair[0] for pair in PARENT_CHILD_OBJTYPE_ID_PAIRS]
+
+# Load optional local config if exists
+local_config = os.path.join(os.path.dirname(__file__), 'local_config.py')
+if os.path.exists(local_config):
+    with open(local_config) as f:
+        exec(f.read())
