@@ -15,28 +15,27 @@ fi
 echo "Installing dependencies..."
 pip install -r requirements.txt
 
-# Create necessary directories
+# Create necessary directories if they don't exist
 echo "Creating package structure..."
-mkdir -p racktables_netbox_migration/extended
+mkdir -p migration/extended
 
 # Copy files if missing
-if [ ! -f "racktables_netbox_migration/__init__.py" ]; then
-    echo "Creating package __init__.py file..."
-    cp __init__.py racktables_netbox_migration/
+if [ ! -f "migration/__init__.py" ]; then
+    echo "Creating migration/__init__.py file..."
+    echo '"""Racktables to NetBox Migration Tool"""' > migration/__init__.py
+    echo '' >> migration/__init__.py
+    echo '__version__ = "1.0.0"' >> migration/__init__.py
 fi
 
-if [ ! -d "racktables_netbox_migration/extended/__init__.py" ]; then
+if [ ! -f "migration/extended/__init__.py" ]; then
     echo "Creating extended package __init__.py file..."
-    mkdir -p racktables_netbox_migration/extended
-    echo '"""Extended migration components"""' > racktables_netbox_migration/extended/__init__.py
+    echo '"""Extended migration components for additional Racktables data"""' > migration/extended/__init__.py
 fi
 
 # Install package locally
+echo "Installing package in development mode..."
 pip install -e .
 
-# Goto package dir
-cd racktables_netbox_migration
-
 echo "Development environment setup complete!"
-echo "You can now run migrate_wrapper.py directly:"
-echo "python migrate_wrapper.py [--site SITE_NAME]"
+echo "You can now run migrate.py:"
+echo "python migration/migrate.py [--site SITE_NAME]"
