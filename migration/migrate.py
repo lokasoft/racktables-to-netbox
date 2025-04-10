@@ -185,6 +185,11 @@ def run_extended_migration(netbox):
         from migration.extended.available_subnets import create_available_subnets
         create_available_subnets(netbox)
     
+    # Generate IP ranges based on imported IP data
+    if CREATE_IP_RANGES:
+        from migration.extended.ip_ranges import create_ip_ranges
+        create_ip_ranges(netbox)
+    
     print("Extended migration completed successfully!")
     return True
 
