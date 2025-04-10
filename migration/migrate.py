@@ -15,6 +15,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+# Define BASE_DIR for custom fields setup
+BASE_DIR = os.path.dirname(SCRIPT_DIR)
+
 # Import core modules
 from migration.config import *
 from migration.utils import *
@@ -60,8 +63,16 @@ def verify_site_exists(netbox, site_name):
         print(f"Target site '{site_name}' found - restricting migration to this site")
         return True
     else:
-        print(f"ERROR: Target site '{site_name}' not found in NetBox")
-        return False
+        # Create the site if it doesn't exist
+        try:
+            from slugify import slugify
+            print(f"Target site '{site_name}' not found in NetBox, creating it...")
+            netbox.dcim.create_site(site_name, slugify(site_name))
+            print(f"Created site '{site_name}'")
+            return True
+        except Exception as e:
+            print(f"ERROR: Failed to create site '{site_name}': {e}")
+            return False
 
 def setup_custom_fields():
     """Run custom fields setup script"""
