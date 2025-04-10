@@ -6,6 +6,7 @@ import pickle
 import time
 from contextlib import contextmanager
 import pymysql
+from slugify import slugify
 
 from migration.config import DB_CONFIG, STORE_DATA
 
@@ -121,11 +122,39 @@ def create_global_tags(netbox, tags):
     for tag in tags:
         if tag not in global_tags:
             try:
-                from slugify import slugify
                 netbox.extras.create_tag(tag, slugify(tag))
             except Exception as e:
                 print(f"Error creating tag {tag}: {e}")
             global_tags.add(tag)
+
+def ensure_tag_exists(netbox, tag_name):
+    """
+    Ensure a tag exists in NetBox before using it
+    
+    Args:
+        netbox: NetBox client instance
+        tag_name: Name of the tag
+        
+    Returns:
+        bool: True if tag exists or was created, False otherwise
+    """
+    try:
+        # Check if tag exists
+        tags = list(netbox.extras.get_tags(name=tag_name))
+        if tags:
+            return True
+            
+        # Create the tag if it doesn't exist
+        tag_slug = slugify(tag_name)
+        netbox.extras.create_tag(
+            name=tag_name,
+            slug=tag_slug
+        )
+        print(f"Created tag: {tag_name}")
+        return True
+    except Exception as e:
+        print(f"Failed to create tag {tag_name}: {e}")
+        return False
 
 def is_available_prefix(prefix_name, comment):
     """
