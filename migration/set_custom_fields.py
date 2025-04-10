@@ -10,9 +10,34 @@ import time
 import sys
 import os
 
-# Get configuration from environment or use defaults
-API_URL = os.environ.get('NETBOX_URL', "http://localhost:8000")
-API_TOKEN = os.environ.get('NETBOX_TOKEN', "your-api-token")
+# Import configuration from config.py
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL
+
+# Construct API URL and token from config.py
+API_URL = f"{'https' if NB_USE_SSL else 'http'}://{NB_HOST}"
+if NB_PORT:
+    API_URL = f"{API_URL}:{NB_PORT}"
+API_TOKEN = NB_TOKEN
+
+# Check if config appears to be default values
+def check_config():
+    default_token = "0123456789abcdef0123456789abcdef01234567"
+    if NB_TOKEN == default_token:
+        print("ERROR: Default API token detected in config.py.")
+        print("Please update migration/config.py with your actual NetBox configuration.")
+        print("You need to set NB_TOKEN to your actual NetBox API token.")
+        return False
+    
+    if NB_HOST == "localhost" and NB_PORT == 8000:
+        print("WARNING: Using default NetBox connection settings (localhost:8000).")
+        print("If this is not your actual NetBox server, update migration/config.py.")
+    
+    return True
+
+# Verify configuration before proceeding
+if not check_config():
+    sys.exit(1)
 
 # Headers for API requests
 HEADERS = {
