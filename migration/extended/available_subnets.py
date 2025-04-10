@@ -135,7 +135,7 @@ def create_available_subnets(netbox):
     network_groups = {}
     for prefix in existing_prefixes:
         try:
-            network = ipaddress.ip_network(prefix['prefix'])
+            network = ipaddress.ip_network(prefix.prefix)
             
             # Skip very small networks
             if network.prefixlen >= 30 and isinstance(network, ipaddress.IPv4Network):
@@ -146,7 +146,7 @@ def create_available_subnets(netbox):
             # Find the smallest containing prefix
             parent_prefix = None
             for potential_parent in existing_prefixes:
-                parent_network = ipaddress.ip_network(potential_parent['prefix'])
+                parent_network = ipaddress.ip_network(potential_parent.prefix)
                 
                 # Skip if same prefix or if potential parent is same/smaller
                 if str(network) == str(parent_network) or parent_network.prefixlen >= network.prefixlen:
@@ -154,7 +154,7 @@ def create_available_subnets(netbox):
                     
                 if network.subnet_of(parent_network):
                     if not parent_prefix or ipaddress.ip_network(parent_prefix).prefixlen > parent_network.prefixlen:
-                        parent_prefix = potential_parent['prefix']
+                        parent_prefix = potential_parent.prefix
             
             # Group by parent prefix
             if parent_prefix:
@@ -162,7 +162,7 @@ def create_available_subnets(netbox):
                     network_groups[parent_prefix] = []
                 network_groups[parent_prefix].append(prefix)
         except Exception as e:
-            error_log(f"Error processing prefix {prefix['prefix']}: {str(e)}")
+            error_log(f"Error processing prefix {prefix.prefix}: {str(e)}")
     
     # Track created available subnets
     available_count = 0
