@@ -58,7 +58,7 @@ def create_ip_networks(netbox, IP, target_site=None):
         tags = getTags(f"ipv{IP}net", Id)
         
         # Determine if this network is available
-        status = "available" if is_available_prefix(prefix_name, comment) else "active"
+        status = "Available" if is_available_prefix(prefix_name, comment) else "active"
         
         # Format description to include tags and prefix name
         description = format_prefix_description(prefix_name, tags, comment)
