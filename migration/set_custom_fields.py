@@ -10,6 +10,9 @@ import time
 import sys
 import os
 
+# Define BASE_DIR
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Import configuration from config.py
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL
@@ -19,6 +22,13 @@ API_URL = f"{'https' if NB_USE_SSL else 'http'}://{NB_HOST}"
 if NB_PORT:
     API_URL = f"{API_URL}:{NB_PORT}"
 API_TOKEN = NB_TOKEN
+
+# Prepare headers for API requests
+HEADERS = {
+    "Authorization": f"Token {API_TOKEN}",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
 
 # Check if config appears to be default values
 def check_config():
@@ -34,19 +44,6 @@ def check_config():
         print("If this is not your actual NetBox server, update migration/config.py.")
     
     return True
-
-def main():
-    """Main function to create custom fields"""
-    # Verify configuration
-    if not check_config():
-        return False
-        
-    # Prepare headers for API requests
-    HEADERS = {
-        "Authorization": f"Token {API_TOKEN}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
 
 # Function to create a custom field
 def create_custom_field(name, field_type, object_types, description="", required=False, weight=0, label=None):
@@ -229,6 +226,10 @@ new_custom_fields = [
 
 def main():
     """Main function to create custom fields"""
+    # Verify configuration
+    if not check_config():
+        return False
+    
     # Combine all custom fields
     all_custom_fields = original_custom_fields + new_custom_fields
     
