@@ -59,9 +59,26 @@ def create_available_prefixes(netbox):
             parent_id = parent.id
             parent_prefix = parent.prefix
             
-            # Skip if the parent is already marked as available
-            status_value = getattr(getattr(parent, 'status', None), 'value', None)
-            if status_value == 'available':
+            # Skip if the parent already has attributes set
+            has_description = bool(getattr(parent, 'description', '').strip())
+            has_vrf = getattr(parent, 'vrf', None) is not None
+            has_role = getattr(parent, 'role', None) is not None
+            has_tenant = getattr(parent, 'tenant', None) is not None
+            has_other_tags = False
+            has_prefix_name = False
+            
+            # Check custom fields for Prefix_name
+            custom_fields = getattr(parent, 'custom_fields', {})
+            if isinstance(custom_fields, dict) and custom_fields.get('Prefix_Name'):
+                has_prefix_name = True
+            
+            for tag in getattr(parent, 'tags', []):
+                if hasattr(tag, 'name') and tag.name != 'Available' and tag.name != 'Auto-Generated' and tag.name != 'API-Detected':
+                    has_other_tags = True
+                    break
+                    
+            # If parent has any fields populated, it's not available for subdivision
+            if has_description or has_vrf or has_role or has_tenant or has_other_tags or has_prefix_name:
                 continue
                 
             # Get available prefixes from API
@@ -96,13 +113,12 @@ def create_available_prefixes(netbox):
                     if prefix_obj.prefixlen > min_prefix_size:
                         continue
                         
+                    # Create the available prefix
                     try:
-                        # Create the available prefix
                         netbox.ipam.create_ip_prefix(
                             prefix=prefix_str,
-                            status="available",
-                            description=f"Available subnet in {parent_prefix}",
-                            tags=[{'name': 'Available'}, {'name': 'Auto-Generated'}, {'name': 'API-Detected'}]
+                            status="reserved",
+                            tags=[{'name': 'Available'}]
                         )
                         available_count += 1
                         print(f"Created available prefix: {prefix_str}")
@@ -173,14 +189,14 @@ def create_available_subnets(netbox):
             parent = ipaddress.ip_network(parent_prefix)
             
             # Sort child prefixes by network address
-            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x['prefix']).network_address)
+            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x.prefix).network_address)
             
             # Track previous network end
             prev_end = int(parent.network_address)
             
             # Find gaps between consecutive prefixes
             for child in child_prefixes:
-                child_net = ipaddress.ip_network(child['prefix'])
+                child_net = ipaddress.ip_network(child.prefix)
                 start = int(child_net.network_address)
                 
                 # If there's a gap between previous end and current start
@@ -200,12 +216,10 @@ def create_available_subnets(netbox):
                                 for subnet in subnets[:2]:
                                     if int(subnet.network_address) < start and int(subnet.broadcast_address) < start:
                                         try:
-                                            # Use a very descriptive status and description
                                             netbox.ipam.create_ip_prefix(
                                                 prefix=str(subnet),
-                                                status="available",
-                                                description=f"Available subnet in {parent_prefix} network space",
-                                                tags=[{'name': 'Available'}, {'name': 'Auto-Generated'}]
+                                                status="reserved",
+                                                tags=[{'name': 'Available'}]
                                             )
                                             available_count += 1
                                             print(f"Created available subnet: {subnet}")
@@ -235,9 +249,8 @@ def create_available_subnets(netbox):
                                     try:
                                         netbox.ipam.create_ip_prefix(
                                             prefix=str(subnet),
-                                            status="available",
-                                            description=f"Available subnet in end of {parent_prefix} network space",
-                                            tags=[{'name': 'Available'}, {'name': 'Auto-Generated'}]
+                                            status="reserved",
+                                            tags=[{'name': 'Available'}]
                                         )
                                         available_count += 1
                                         print(f"Created end gap subnet: {subnet}")
