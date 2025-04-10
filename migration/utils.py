@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 import pymysql
 
-from racktables_netbox_migration.config import DB_CONFIG, STORE_DATA
+from migration.config import DB_CONFIG, STORE_DATA
 
 def error_log(string):
     """
