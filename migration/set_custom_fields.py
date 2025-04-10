@@ -8,10 +8,11 @@ import requests
 import json
 import time
 import sys
+import os
 
-# Configuration - UPDATE YOUR API TOKEN
-API_URL = "http://localhost:8000"
-API_TOKEN = "your-api-token"
+# Get configuration from environment or use defaults
+API_URL = os.environ.get('NETBOX_URL', "http://localhost:8000")
+API_TOKEN = os.environ.get('NETBOX_TOKEN', "your-api-token")
 
 # Headers for API requests
 HEADERS = {
@@ -185,11 +186,11 @@ new_custom_fields = [
      "description": "Real server pool"},
     
     # Monitoring custom fields for devices
-    {"name": "Cacti_Server", "type": "text", "object_types": ["dcim.device"],
+    {"name": "Cacti_Server", "type": "text", "object_types": ["dcim.device", "virtualization.virtualmachine"],
      "description": "Cacti server monitoring this device"},
-    {"name": "Cacti_Graph_ID", "type": "text", "object_types": ["dcim.device"], 
+    {"name": "Cacti_Graph_ID", "type": "text", "object_types": ["dcim.device", "virtualization.virtualmachine"], 
      "description": "ID of Cacti graph for this device"},
-    {"name": "Monitoring_URL", "type": "text", "object_types": ["dcim.device"], 
+    {"name": "Monitoring_URL", "type": "text", "object_types": ["dcim.device", "virtualization.virtualmachine"], 
      "description": "URL to monitoring system for this device"},
     
     # Attachment custom fields 
@@ -204,7 +205,7 @@ def main():
     # Combine all custom fields
     all_custom_fields = original_custom_fields + new_custom_fields
     
-    print(f"Creating {len(all_custom_fields)} custom fields in NetBox 4.2.6...")
+    print(f"Creating {len(all_custom_fields)} custom fields in NetBox...")
     
     success_count = 0
     failure_count = 0
