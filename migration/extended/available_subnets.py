@@ -31,16 +31,18 @@ def create_available_prefixes(netbox):
     # Filter to find prefixes that could be parents (not too small)
     for p in existing_prefixes:
         try:
-            if not p.get('prefix'):
+            # Check if prefix attribute exists and has a value
+            if not hasattr(p, 'prefix') or not p.prefix:
                 continue
                 
-            network = ipaddress.ip_network(p['prefix'])
+            network = ipaddress.ip_network(p.prefix)
             
             # Consider only IPv4 prefixes up to /24
             if isinstance(network, ipaddress.IPv4Network) and network.prefixlen < 24:
                 parent_prefixes.append(p)
         except Exception as e:
-            error_log(f"Error processing potential parent prefix {p.get('prefix', 'unknown')}: {str(e)}")
+            prefix_str = getattr(p, 'prefix', 'unknown')
+            error_log(f"Error processing potential parent prefix {prefix_str}: {str(e)}")
     
     print(f"Found {len(parent_prefixes)} potential parent prefixes")
     available_count = 0
@@ -54,11 +56,12 @@ def create_available_prefixes(netbox):
         batch = parent_prefixes[i:i+batch_size]
         
         for parent in batch:
-            parent_id = parent['id']
-            parent_prefix = parent['prefix']
+            parent_id = parent.id
+            parent_prefix = parent.prefix
             
             # Skip if the parent is already marked as available
-            if parent.get('status', {}).get('value') == 'available':
+            status_value = getattr(getattr(parent, 'status', None), 'value', None)
+            if status_value == 'available':
                 continue
                 
             # Get available prefixes from API
