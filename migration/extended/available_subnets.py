@@ -2,7 +2,119 @@
 Functions for creating available subnet prefixes with improved detection
 """
 import ipaddress
-from racktables_netbox_migration.utils import error_log, is_available_prefix
+import requests
+from migration.utils import error_log, is_available_prefix
+from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL
+
+def create_available_prefixes(netbox):
+    """
+    Create available subnet prefixes using NetBox API
+    
+    Args:
+        netbox: NetBox client instance
+    """
+    print("\nCreating available subnet prefixes using NetBox API...")
+    
+    # Configure API access
+    protocol = "https" if NB_USE_SSL else "http"
+    api_url = f"{protocol}://{NB_HOST}:{NB_PORT}/api"
+    headers = {
+        "Authorization": f"Token {NB_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    # Get all parent prefixes that could contain available prefixes
+    existing_prefixes = netbox.ipam.get_ip_prefixes()
+    parent_prefixes = []
+    
+    # Filter to find prefixes that could be parents (not too small)
+    for p in existing_prefixes:
+        try:
+            if not p.get('prefix'):
+                continue
+                
+            network = ipaddress.ip_network(p['prefix'])
+            
+            # Consider only IPv4 prefixes up to /24
+            if isinstance(network, ipaddress.IPv4Network) and network.prefixlen < 24:
+                parent_prefixes.append(p)
+        except Exception as e:
+            error_log(f"Error processing potential parent prefix {p.get('prefix', 'unknown')}: {str(e)}")
+    
+    print(f"Found {len(parent_prefixes)} potential parent prefixes")
+    available_count = 0
+    
+    # Process parent prefixes in batches to avoid overwhelming the API
+    batch_size = 10
+    max_prefixes_per_parent = 5
+    min_prefix_size = 16  # Only create prefixes of this size or larger
+    
+    for i in range(0, len(parent_prefixes), batch_size):
+        batch = parent_prefixes[i:i+batch_size]
+        
+        for parent in batch:
+            parent_id = parent['id']
+            parent_prefix = parent['prefix']
+            
+            # Skip if the parent is already marked as available
+            if parent.get('status', {}).get('value') == 'available':
+                continue
+                
+            # Get available prefixes from API
+            available_url = f"{api_url}/ipam/prefixes/{parent_id}/available-prefixes/"
+            
+            try:
+                response = requests.get(
+                    available_url, 
+                    headers=headers,
+                    verify=NB_USE_SSL
+                )
+                
+                if response.status_code != 200:
+                    error_log(f"Error getting available prefixes for {parent_prefix}: {response.text}")
+                    continue
+                    
+                available_prefixes = response.json()
+                
+                # Filter prefixes - select larger prefixes first
+                sorted_prefixes = sorted(
+                    available_prefixes,
+                    key=lambda p: ipaddress.ip_network(p['prefix']).prefixlen
+                )
+                
+                # Only create a limited number of prefixes per parent
+                prefix_count = 0
+                for available in sorted_prefixes:
+                    prefix_str = available['prefix']
+                    prefix_obj = ipaddress.ip_network(prefix_str)
+                    
+                    # Only create larger prefixes
+                    if prefix_obj.prefixlen > min_prefix_size:
+                        continue
+                        
+                    try:
+                        # Create the available prefix
+                        netbox.ipam.create_ip_prefix(
+                            prefix=prefix_str,
+                            status="available",
+                            description=f"Available subnet in {parent_prefix}",
+                            tags=[{'name': 'Available'}, {'name': 'Auto-Generated'}, {'name': 'API-Detected'}]
+                        )
+                        available_count += 1
+                        print(f"Created available prefix: {prefix_str}")
+                        
+                        prefix_count += 1
+                        if prefix_count >= max_prefixes_per_parent:
+                            break
+                            
+                    except Exception as e:
+                        error_log(f"Error creating available prefix {prefix_str}: {str(e)}")
+                        
+            except Exception as e:
+                error_log(f"Error processing parent prefix {parent_prefix}: {str(e)}")
+                
+    print(f"Created {available_count} available subnet prefixes using API")
 
 def create_available_subnets(netbox):
     """
