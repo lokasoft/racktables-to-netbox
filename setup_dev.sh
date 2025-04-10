@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for development environment with all components from scratch
+# Enhanced setup script for development environment with all components from scratch
 
 print_usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -43,8 +43,9 @@ setup_netbox() {
     # Generate secure credentials
     echo "Generating secure credentials..."
     SECRET_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 64)
-    API_TOKEN=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 40)
-    POSTGRES_PASSWORD="postgres123"
+    API_TOKEN=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 40)
+    SUPERUSER_PASSWORD=$(cat /dev/urandom |  tr -dc 'a-zA-Z0-9' | head -c 8)
+    POSTGRES_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 24)
     
     # Check for required system packages
     echo "Checking for required system packages..."
@@ -97,7 +98,7 @@ services:
     environment:
       SUPERUSER_NAME: admin
       SUPERUSER_EMAIL: admin@example.com
-      SUPERUSER_PASSWORD: admin123
+      SUPERUSER_PASSWORD: ${SUPERUSER_PASSWORD}
       SUPERUSER_API_TOKEN: ${API_TOKEN}
       ALLOWED_HOSTS: '*'
       SECRET_KEY: '${SECRET_KEY}'
@@ -163,7 +164,7 @@ EOF
         # Create admin user with reliable password
         echo "Creating admin user with fixed password..."
         docker exec -it netbox-docker-netbox-1 /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py createsuperuser --username=admin --email=admin@example.com --noinput
-        docker exec -it netbox-docker-netbox-1 /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell -c "from django.contrib.auth import get_user_model; u=get_user_model().objects.get(username='admin'); u.set_password('admin123'); u.save()"
+        docker exec -it netbox-docker-netbox-1 /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell -c "from django.contrib.auth import get_user_model; u=get_user_model().objects.get(username='admin'); u.set_password('${SUPERUSER_PASSWORD}'); u.save()"
         
         # Create API token
         echo "Creating API token..."
@@ -179,13 +180,13 @@ EOF
     echo "NETBOX_HOST=localhost" > .netbox_creds
     echo "NETBOX_PORT=8000" >> .netbox_creds
     echo "NETBOX_TOKEN=$API_TOKEN" >> .netbox_creds
-    echo "NETBOX_PASSWORD=admin123" >> .netbox_creds
+    echo "NETBOX_PASSWORD=$SUPERUSER_PASSWORD" >> .netbox_creds
     echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .netbox_creds
     
     echo "NetBox setup complete."
     echo "Access NetBox at http://localhost:8000"
     echo "Username: admin"
-    echo "Password: admin123"
+    echo "Password: $SUPERUSER_PASSWORD"
     echo "API Token: $API_TOKEN"
     echo "Postgres Password: $POSTGRES_PASSWORD"
 }
