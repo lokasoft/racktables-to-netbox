@@ -14,8 +14,8 @@ Before starting, ensure you have:
 ## Installation Methods
 
 You can install and run this tool in two ways:
-1. **Development Mode**: Run directly from the cloned repository (recommended for testing)
-2. **Production Mode**: Install as a Python package (recommended for production use)
+1. **Direct Execution** (recommended for most users)
+2. **Package Installation** (optional, for system-wide installation)
 
 ### 1. Clone the Repository
 
@@ -69,19 +69,23 @@ pip install -r requirements.txt
 
 ### 4. Choose Your Installation Method
 
-#### Development Mode (Run Directly)
+#### Direct Execution (Recommended)
 
-This allows you to run the tool directly from the cloned repository without installing it as a package:
+This allows you to run the tool directly from the cloned repository:
 
 ```bash
-# No additional installation steps needed
-# You can run the scripts directly
-python migrate_wrapper.py --site "YourSiteName"
+# No installation needed - just run migrate.py with Python
+python migrate.py --site "YourSiteName"
+
+# Optional arguments
+python migrate.py --basic-only  # Run only basic migration
+python migrate.py --extended-only  # Run only extended components
+python migrate.py --skip-custom-fields  # Skip custom fields setup
 ```
 
-#### Production Mode (Install as Package)
+#### Package Installation (Optional)
 
-Install the package in development mode to make it accessible system-wide:
+Only necessary if you want the tool available system-wide:
 
 ```bash
 # Install in development mode (editable)
@@ -89,6 +93,9 @@ pip install -e .
 
 # Or install normally
 pip install .
+
+# Then run using the command
+migrate-racktables --site "YourSiteName"
 ```
 
 ### 5. Configure NetBox MAX_PAGE_SIZE Setting
@@ -108,23 +115,9 @@ chmod +x scripts/max-page-size-check.sh
 
 This will check if the MAX_PAGE_SIZE is already set to 0 and offer to update it if needed.
 
-### 6. Configure NetBox Custom Fields
+### 6. Configure Database and API Connection
 
-The migration tool requires specific custom fields to be added to your NetBox instance. Use the provided script to automatically create all required fields:
-
-```bash
-# Edit the script to set your API token and URL
-nano scripts/set_custom_fields.py
-
-# Run the script
-python scripts/set_custom_fields.py
-```
-
-Alternatively, you can add custom fields manually using NetBox's UI according to the definitions in `scripts/set_custom_fields.py`.
-
-### 7. Configure Database and API Connection
-
-Edit `racktables_netbox_migration/config.py` to set your connection parameters:
+Edit `migration/config.py` to set your connection parameters:
 
 ```python
 # NetBox API connection settings
@@ -145,59 +138,66 @@ DB_CONFIG = {
 }
 ```
 
-### 8. Test Database Connection
+Alternatively, you can use environment variables:
+
+```bash
+# NetBox connection
+export NETBOX_HOST=localhost
+export NETBOX_PORT=8000
+export NETBOX_TOKEN=0123456789abcdef0123456789abcdef01234567
+export NETBOX_USE_SSL=False
+
+# Database connection
+export RACKTABLES_DB_HOST=10.248.48.4
+export RACKTABLES_DB_PORT=3306
+export RACKTABLES_DB_USER=root
+export RACKTABLES_DB_PASSWORD=secure-password
+export RACKTABLES_DB_NAME=test1
+```
+
+### 7. Test Database Connection
 
 Before running the full migration, test your database connection:
 
 ```python
 import pymysql
-from racktables_netbox_migration.config import DB_CONFIG
+from migration.config import DB_CONFIG
 
 connection = pymysql.connect(**DB_CONFIG)
 print("Connection successful!")
 connection.close()
 ```
 
-### 9. Run the Migration
+### 8. Run the Migration
 
-Run the wrapper script to perform the migration:
+Run the migration script:
 
 ```bash
-python migrate_wrapper.py
+python migrate.py
 ```
 
 If you want to restrict migration to a specific site:
 ```bash
-python migrate_wrapper.py --site "YourSiteName"
+python migrate.py --site "YourSiteName"
 ```
 
-After the base migration completes, run the extended migration for additional data:
+You can also run specific parts of the migration:
 ```bash
-python extended_migrate.py
+# Run only basic migration (no extended components)
+python migrate.py --basic-only
+
+# Run only extended migration components
+python migrate.py --extended-only
+
+# Skip setting up custom fields
+python migrate.py --skip-custom-fields
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **ModuleNotFoundError: No module named 'racktables_netbox_migration'**
-   
-   This usually means the package isn't in your Python path. Solutions:
-   - Make sure you're running from the repository root directory
-   - If using development mode, the modified migrate_wrapper.py handles this
-   - If using production mode, ensure you've installed the package with `pip install -e .`
-
-2. **Externally Managed Environment Error**
-   
-   If you see an error like:
-   ```
-   error: externally-managed-environment
-   This environment is externally managed
-   ```
-   
-   This means you need to use a virtual environment or pipx as described in the installation steps.
-
-3. **Database Connection Issues**
+1. **Database Connection Issues**
    
    If you encounter database connection problems, check:
    - Database credentials in `config.py`
@@ -207,7 +207,7 @@ python extended_migrate.py
    
    Try connecting with a MySQL client to verify credentials.
 
-4. **NetBox API Connection Issues**
+2. **NetBox API Connection Issues**
    
    If you have problems connecting to NetBox:
    - Verify the API token is valid and has appropriate permissions
@@ -221,7 +221,7 @@ python extended_migrate.py
    curl -H "Authorization: Token YOUR_TOKEN" http://your-netbox-host:port/api/
    ```
 
-5. **Missing Custom Fields**
+3. **Missing Custom Fields**
    
    If data isn't being correctly migrated because of missing custom fields:
    - Check if custom fields were properly added to NetBox
@@ -230,22 +230,13 @@ python extended_migrate.py
    - Check the output of the set_custom_fields.py script for errors
    - Verify permissions for the API token include custom field management
 
-6. **Memory or Performance Issues**
+4. **Memory or Performance Issues**
    
    If the script runs out of memory or is too slow:
    - Try running parts of the migration by adjusting the boolean flags in `config.py`
    - Increase your Python process memory limit if possible
    - Run the script on a machine with more resources
    - Consider filtering by site with the `--site` parameter
-   - Break the migration into smaller batches using the config flags
-
-7. **Import Errors**
-   
-   If you see import errors:
-   - Make sure you're running the scripts from the repository root directory
-   - Verify the virtual environment is activated
-   - Check that all dependencies are installed
-   - Try reinstalling the package with `pip install -e .`
 
 ## Post-Migration Verification
 
@@ -260,17 +251,16 @@ After migration completes, verify:
 
 To check for missing data, you can use the NetBox UI or API to browse the migrated data and compare with your Racktables instance.
 
-For IP networks and addresses, you can use the provided scripts in the `scripts/` directory to analyze the migrated data.
-
 ## Additional Information
 
-### Extending the Migration
+### Configuration Options
 
-If you need to customize the migration process:
+You can configure the migration tool using:
 
-1. Edit `config.py` to adjust migration flags for specific components
-2. Create custom scripts based on the examples in the `scripts/` directory
-3. Modify the core modules in `racktables_netbox_migration/` directory
+1. Environment variables (see section 6)
+2. Command line arguments (see section 8)
+3. Direct edits to the `migration/config.py` file
+4. Custom configuration file: `python migrate.py --config your_config.py`
 
 ### Getting Help
 
