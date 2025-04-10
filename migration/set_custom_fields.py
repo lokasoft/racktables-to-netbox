@@ -35,16 +35,18 @@ def check_config():
     
     return True
 
-# Verify configuration before proceeding
-if not check_config():
-    sys.exit(1)
-
-# Headers for API requests
-HEADERS = {
-    "Authorization": f"Token {API_TOKEN}",
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-}
+def main():
+    """Main function to create custom fields"""
+    # Verify configuration
+    if not check_config():
+        return False
+        
+    # Prepare headers for API requests
+    HEADERS = {
+        "Authorization": f"Token {API_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
 
 # Function to create a custom field
 def create_custom_field(name, field_type, object_types, description="", required=False, weight=0, label=None):
