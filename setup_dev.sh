@@ -52,17 +52,7 @@ setup_netbox() {
     if ! command -v python3 &> /dev/null; then
         echo "Error: Python 3 is not installed. Installing required packages..."
         sudo apt update
-        sudo apt install -y python3 python3-pip python3-venv python3-dev build-essential libxml2-dev libxslt1-dev libffi-dev libpq-dev libssl-dev zlib1g-dev git
-    fi
-    
-    # Check Python version
-    PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-    
-    if [[ "$PYTHON_MAJOR" -lt 3 || ("$PYTHON_MAJOR" -eq 3 && "$PYTHON_MINOR" -lt 10) ]]; then
-        echo "Warning: Python 3.10 or later is recommended (found $PYTHON_VERSION)"
-        echo "NetBox 4.x requires Python 3.10+"
+        sudo apt install -y python3 python3-pip python3-venv python3-dev build-essential
     fi
     
     # Check if Docker is installed
@@ -171,10 +161,13 @@ EOF
         docker exec -it netbox-docker-netbox-1 /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell -c "from users.models import Token; from django.contrib.auth import get_user_model; Token.objects.create(user=get_user_model().objects.get(username='admin'), key='${API_TOKEN}', write_enabled=True)"
     else
         echo "NetBox may not be fully initialized yet. Please check logs with:"
-        echo "  docker compose -f $(pwd)/docker-compose.yml -f $(pwd)/docker-compose.override.yml logs -f netbox"
+        echo "  docker compose logs -f netbox"
     fi
     
     cd ..
+    
+    # Create symlink for migration directory
+    [ -d "migration" ] && [ ! -L "racktables_netbox_migration" ] && ln -s migration racktables_netbox_migration
     
     # Save credentials for other functions
     echo "NETBOX_HOST=localhost" > .netbox_creds
@@ -196,6 +189,13 @@ setup_gitclone() {
     # Check for prerequisites
     echo "Checking for prerequisites..."
     
+    # Make sure python3-venv is installed
+    if ! dpkg -l | grep -q python3-venv; then
+        echo "Installing python3-venv package..."
+        sudo apt update
+        sudo apt install -y python3-venv python3-pip
+    fi
+    
     if ! command -v git &>/dev/null; then
         echo "Error: Git is required but not installed. Please install git first."
         return 1
@@ -206,72 +206,62 @@ setup_gitclone() {
         return 1
     fi
     
-    # Create temporary directory and clone there if current dir isn't empty
-    if [ "$(ls -A | grep -v 'venv\|netbox-docker\|setup-dev.sh\|requirements.txt\|.netbox_creds')" ]; then
+    # Clone the repository if needed
+    if [ ! -d ".git" ]; then
         TEMP_DIR="racktables-migration"
-        mkdir -p $TEMP_DIR
-        echo "Current directory not empty, cloning to $TEMP_DIR..."
+        echo "Cloning to $TEMP_DIR..."
         git clone https://github.com/enoch85/racktables-to-netbox.git $TEMP_DIR
         echo "Moving files from $TEMP_DIR to current directory..."
-        mv $TEMP_DIR/* $TEMP_DIR/.* . 2>/dev/null || true
-        rmdir $TEMP_DIR
-    else
-        # Current directory is empty or only contains expected files
-        echo "Cloning the repository to current directory..."
-        git clone https://github.com/enoch85/racktables-to-netbox.git .
+        cp -r $TEMP_DIR/* $TEMP_DIR/.??* . 2>/dev/null || true
+        rm -rf $TEMP_DIR
     fi
     
-    # Create virtual environment if not already in one
-    if [[ -z "$VIRTUAL_ENV" ]]; then
-        echo "Creating virtual environment..."
-        python3 -m venv venv
-        
-        # Activate virtual environment
-        echo "Activating virtual environment..."
-        source venv/bin/activate
-    fi
+    # Create virtual environment
+    echo "Creating virtual environment..."
+    python3 -m venv venv
     
-    # Install dependencies and development mode
+    # Activate virtual environment
+    echo "Activating virtual environment..."
+    source venv/bin/activate
+    
+    # Install dependencies
     echo "Installing dependencies..."
     pip install --upgrade pip
     
     # Install all requirements
-    pip install -r requirements.txt --no-cache-dir
+    pip install -r requirements.txt
     
-    # Force install each package from requirements.txt
-    while read package; do
-        # Skip empty lines and comments
-        [[ -z "$package" || "$package" =~ ^# ]] && continue
-        
-        # Extract package name without version specifiers
-        pkg_name=$(echo "$package" | sed -E 's/([a-zA-Z0-9_.-]+).*/\1/')
-        
-        echo "Force installing $pkg_name..."
-        pip install --force-reinstall "$pkg_name"
-        
-    done < requirements.txt
+    # Create symlink for module compatibility
+    echo "Creating symlink for racktables_netbox_migration..."
+    [ -d "migration" ] && [ ! -L "racktables_netbox_migration" ] && ln -s migration racktables_netbox_migration
     
+    # Install package in development mode
     echo "Installing package in development mode..."
     pip install -e .
     
-    # Get NetBox credentials if available
-    NB_HOST="localhost"
-    NB_PORT="8000"
-    NB_TOKEN="0123456789abcdef0123456789abcdef01234567"
-    
+    # Update config.py with correct credentials
     if [ -f ".netbox_creds" ]; then
         echo "Using NetBox credentials from setup"
         source .netbox_creds
-        NB_HOST="${NETBOX_HOST}"
-        NB_PORT="${NETBOX_PORT}"
-        NB_TOKEN="${NETBOX_TOKEN}"
-        
-        # Update config.py with correct API token
         if [ -f "migration/config.py" ]; then
-            sed -i "s/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '[^']*')/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '${NB_TOKEN}')/" migration/config.py
-            sed -i "s/NB_HOST = os.environ.get('NETBOX_HOST', '[^']*')/NB_HOST = os.environ.get('NETBOX_HOST', '${NB_HOST}')/" migration/config.py
-            sed -i "s/NB_PORT = int(os.environ.get('NETBOX_PORT', '[^']*'))/NB_PORT = int(os.environ.get('NETBOX_PORT', '${NB_PORT}'))/" migration/config.py
+            sed -i "s/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '[^']*')/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '${NETBOX_TOKEN}')/" migration/config.py
+            sed -i "s/'password': os.environ.get('RACKTABLES_DB_PASSWORD', 'secure-password')/'password': os.environ.get('RACKTABLES_DB_PASSWORD', 'your-database-password')/" migration/config.py
             echo "Updated config.py with NetBox credentials"
+        fi
+    else
+        # Prompt for database credentials
+        read -p "Enter your Racktables database host: " DB_HOST
+        read -p "Enter your Racktables database username: " DB_USER
+        read -s -p "Enter your Racktables database password: " DB_PASS
+        echo ""
+        read -p "Enter your Racktables database name: " DB_NAME
+        
+        # Update config.py
+        if [ -f "migration/config.py" ]; then
+            sed -i "s/'host': os.environ.get('RACKTABLES_DB_HOST', '[^']*')/'host': os.environ.get('RACKTABLES_DB_HOST', '${DB_HOST}')/" migration/config.py
+            sed -i "s/'user': os.environ.get('RACKTABLES_DB_USER', '[^']*')/'user': os.environ.get('RACKTABLES_DB_USER', '${DB_USER}')/" migration/config.py
+            sed -i "s/'password': os.environ.get('RACKTABLES_DB_PASSWORD', '[^']*')/'password': os.environ.get('RACKTABLES_DB_PASSWORD', '${DB_PASS}')/" migration/config.py
+            sed -i "s/'db': os.environ.get('RACKTABLES_DB_NAME', '[^']*')/'db': os.environ.get('RACKTABLES_DB_NAME', '${DB_NAME}')/" migration/config.py
         fi
     fi
     
@@ -294,6 +284,10 @@ setup_package() {
     # Install build dependencies
     echo "Installing build dependencies..."
     pip install build twine wheel setuptools
+    
+    # Create symlink for module compatibility
+    echo "Creating symlink for racktables_netbox_migration..."
+    [ -d "migration" ] && [ ! -L "racktables_netbox_migration" ] && ln -s migration racktables_netbox_migration
     
     # Update version in setup.py if needed
     if [ -f "migration/__init__.py" ]; then
@@ -334,18 +328,6 @@ setup(
             "migrate-racktables=migration.migrate:main",
         ],
     },
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: System Administrators",
-        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-    ],
     python_requires=">=3.6",
 )
 EOF
@@ -365,8 +347,6 @@ EOF
     python -m build
     
     echo "Package setup complete!"
-    echo "To publish to PyPI: python -m twine upload dist/*"
-    echo "To install locally: pip install dist/*.whl"
 }
 
 # Run the selected functions
