@@ -14,8 +14,36 @@ def create_ip_ranges_from_available_prefixes(netbox):
     """
     print("\nCreating IP ranges from available prefixes...")
     
-    # Get all available prefixes
-    available_prefixes = netbox.ipam.get_ip_prefixes(status='available')
+    # Get all prefixes first
+    all_prefixes = netbox.ipam.get_ip_prefixes()
+    available_prefixes = []
+    
+    # A prefix is available only if it has no attributes set except for the prefix itself
+    for prefix in all_prefixes:
+        # Check if it has tags, description, vrf, role, tenant, or other attributes
+        has_description = bool(getattr(prefix, 'description', '').strip())
+        has_vrf = getattr(prefix, 'vrf', None) is not None
+        has_role = getattr(prefix, 'role', None) is not None
+        has_tenant = getattr(prefix, 'tenant', None) is not None
+        has_tags = len(getattr(prefix, 'tags', [])) > 0
+        has_prefix_name = False
+        
+        # Check custom fields for Prefix_name
+        custom_fields = getattr(prefix, 'custom_fields', {})
+        if isinstance(custom_fields, dict) and custom_fields.get('Prefix_Name'):
+            has_prefix_name = True
+        
+        # Only consider it available if it has the Available tag
+        has_available_tag = False
+        for tag in getattr(prefix, 'tags', []):
+            if hasattr(tag, 'name') and tag.name == 'Available':
+                has_available_tag = True
+                break
+        
+        # Must have Available tag and no other attributes
+        if has_available_tag and not (has_description or has_vrf or has_role or has_tenant or has_prefix_name):
+            available_prefixes.append(prefix)
+    
     print(f"Found {len(available_prefixes)} available prefixes")
     
     # Get existing IP ranges to avoid duplicates
@@ -53,15 +81,11 @@ def create_ip_ranges_from_available_prefixes(netbox):
         
         if range_cidr not in existing_range_cidrs:
             try:
-                source_tag = "API-Detected" if api_detected else "Auto-Generated"
-                description = f"Available IP range for {prefix_str}"
                 ip_range = netbox.ipam.create_ip_range(
                     start_address=str(start_ip),
                     end_address=str(end_ip),
-                    status="available",
-                    description=description,
-                    tags=[{"name": "Available"}, {"name": source_tag}, 
-                          {"name": IPV4_TAG if isinstance(prefix_obj, ipaddress.IPv4Network) else IPV6_TAG}]
+                    status="reserved",
+                    tags=[{"name": "Available"}]
                 )
                 existing_range_cidrs.add(range_cidr)
                 ranges_created += 1
@@ -105,7 +129,7 @@ def create_ip_ranges(netbox):
     standalone_prefixes = []
     
     for prefix in prefixes:
-        prefix_net = ipaddress.ip_network(prefix['prefix'])
+        prefix_net = ipaddress.ip_network(prefix.prefix)
         parent_found = False
         
         # Skip very small prefixes for analysis
@@ -116,19 +140,19 @@ def create_ip_ranges(netbox):
         
         # Find parent prefix
         for potential_parent in prefixes:
-            if prefix['prefix'] == potential_parent['prefix']:
+            if prefix.prefix == potential_parent.prefix:
                 continue
                 
-            parent_net = ipaddress.ip_network(potential_parent['prefix'])
+            parent_net = ipaddress.ip_network(potential_parent.prefix)
             
             # Skip if potential parent has same or higher prefix length
             if parent_net.prefixlen >= prefix_net.prefixlen:
                 continue
                 
             if prefix_net.subnet_of(parent_net):
-                if potential_parent['prefix'] not in network_groups:
-                    network_groups[potential_parent['prefix']] = []
-                network_groups[potential_parent['prefix']].append(prefix)
+                if potential_parent.prefix not in network_groups:
+                    network_groups[potential_parent.prefix] = []
+                network_groups[potential_parent.prefix].append(prefix)
                 parent_found = True
                 break
         
@@ -143,13 +167,13 @@ def create_ip_ranges(netbox):
             parent = ipaddress.ip_network(parent_prefix)
             
             # Sort child prefixes by network address
-            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x['prefix']).network_address)
+            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x.prefix).network_address)
             
             # Process gaps between child prefixes
             prev_end = None
             
             for i, child in enumerate(child_prefixes):
-                current = ipaddress.ip_network(child['prefix'])
+                current = ipaddress.ip_network(child.prefix)
                 current_start = int(current.network_address)
                 
                 # If this is not the first prefix and there's a gap
@@ -162,13 +186,11 @@ def create_ip_ranges(netbox):
                     range_cidr = f"{start_ip}-{end_ip}"
                     if range_cidr not in existing_range_cidrs:
                         try:
-                            description = f"Available IP range in {parent_prefix}"
                             ip_range = netbox.ipam.create_ip_range(
                                 start_address=str(start_ip),
                                 end_address=str(end_ip),
-                                status="available",
-                                description=description,
-                                tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(parent, ipaddress.IPv4Network) else IPV6_TAG}]
+                                status="reserved",
+                                tags=[{"name": "Available"}]
                             )
                             existing_range_cidrs.add(range_cidr)
                             ranges_created += 1
@@ -189,13 +211,11 @@ def create_ip_ranges(netbox):
                 range_cidr = f"{start_ip}-{end_ip}"
                 if range_cidr not in existing_range_cidrs:
                     try:
-                        description = f"Available IP range at end of {parent_prefix}"
                         ip_range = netbox.ipam.create_ip_range(
                             start_address=str(start_ip),
                             end_address=str(end_ip),
-                            status="available",
-                            description=description,
-                            tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(parent, ipaddress.IPv4Network) else IPV6_TAG}]
+                            status="reserved",
+                            tags=[{"name": "Available"}]
                         )
                         existing_range_cidrs.add(range_cidr)
                         ranges_created += 1
@@ -209,13 +229,13 @@ def create_ip_ranges(netbox):
     # Process standalone prefixes
     for prefix in standalone_prefixes:
         try:
-            network = ipaddress.ip_network(prefix['prefix'])
+            network = ipaddress.ip_network(prefix.prefix)
             
             # Check for addresses within this prefix
             contained_addresses = []
             for ip in ip_addresses:
                 try:
-                    addr = ipaddress.ip_address(ip['address'].split('/')[0])
+                    addr = ipaddress.ip_address(ip.address.split('/')[0])
                     if addr in network:
                         contained_addresses.append(addr)
                 except ValueError:
@@ -229,13 +249,11 @@ def create_ip_ranges(netbox):
                 
                 if range_cidr not in existing_range_cidrs:
                     try:
-                        description = f"Available IP range for entire {prefix['prefix']}"
                         ip_range = netbox.ipam.create_ip_range(
                             start_address=str(start_ip),
                             end_address=str(end_ip),
-                            status="available",
-                            description=description,
-                            tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(network, ipaddress.IPv4Network) else IPV6_TAG}]
+                            status="reserved",
+                            tags=[{"name": "Available"}]
                         )
                         existing_range_cidrs.add(range_cidr)
                         ranges_created += 1
@@ -254,13 +272,11 @@ def create_ip_ranges(netbox):
                     
                     if range_cidr not in existing_range_cidrs:
                         try:
-                            description = f"Available IP range at start of {prefix['prefix']}"
                             ip_range = netbox.ipam.create_ip_range(
                                 start_address=str(start_ip),
                                 end_address=str(end_ip),
-                                status="available",
-                                description=description,
-                                tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(network, ipaddress.IPv4Network) else IPV6_TAG}]
+                                status="reserved",
+                                tags=[{"name": "Available"}]
                             )
                             existing_range_cidrs.add(range_cidr)
                             ranges_created += 1
@@ -280,13 +296,11 @@ def create_ip_ranges(netbox):
                         
                         if range_cidr not in existing_range_cidrs:
                             try:
-                                description = f"Available IP range in {prefix['prefix']}"
                                 ip_range = netbox.ipam.create_ip_range(
                                     start_address=str(start_ip),
                                     end_address=str(end_ip),
-                                    status="available",
-                                    description=description,
-                                    tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(network, ipaddress.IPv4Network) else IPV6_TAG}]
+                                    status="reserved",
+                                    tags=[{"name": "Available"}]
                                 )
                                 existing_range_cidrs.add(range_cidr)
                                 ranges_created += 1
@@ -302,13 +316,11 @@ def create_ip_ranges(netbox):
                     
                     if range_cidr not in existing_range_cidrs:
                         try:
-                            description = f"Available IP range at end of {prefix['prefix']}"
                             ip_range = netbox.ipam.create_ip_range(
                                 start_address=str(start_ip),
                                 end_address=str(end_ip),
-                                status="available",
-                                description=description,
-                                tags=[{"name": "Available"}, {"name": IPV4_TAG if isinstance(network, ipaddress.IPv4Network) else IPV6_TAG}]
+                                status="reserved",
+                                tags=[{"name": "Available"}]
                             )
                             existing_range_cidrs.add(range_cidr)
                             ranges_created += 1
@@ -317,6 +329,6 @@ def create_ip_ranges(netbox):
                             error_log(f"Error creating IP range {start_ip} - {end_ip}: {str(e)}")
         
         except Exception as e:
-            error_log(f"Error processing standalone prefix {prefix['prefix']}: {str(e)}")
+            error_log(f"Error processing standalone prefix {prefix.prefix}: {str(e)}")
     
     print(f"IP range generation completed. Created {ranges_created} IP ranges.")
