@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
 """
-Main migration script for transferring data from Racktables to NetBox
+Unified migration script for Racktables to NetBox
 """
 
 import os
 import sys
-import ipaddress
-import random
-import time
+import argparse
+import importlib.util
+import logging
+from datetime import datetime
 
-# Add the current directory to the Python path if it's not already there
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Setup directory-based imports that work without package installation
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
 
-# Import the modular components
-from racktables_netbox_migration.config import *
-from racktables_netbox_migration.utils import *
-from racktables_netbox_migration.db import *
+# Import core modules
+from migration.config import *
+from migration.utils import *
+from migration.db import *
+from migration.custom_netbox import NetBox
 
-# Import the custom NetBox class
-from custom_netbox import NetBox
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Migrate data from Racktables to NetBox')
+    parser.add_argument('--site', type=str, help='Target site name to restrict migration to')
+    parser.add_argument('--config', type=str, help='Path to custom configuration file')
+    parser.add_argument('--basic-only', action='store_true', help='Run only basic migration (no extended components)')
+    parser.add_argument('--extended-only', action='store_true', help='Run only extended migration components')
+    parser.add_argument('--skip-custom-fields', action='store_true', help='Skip setting up custom fields')
+    return parser.parse_args()
 
 def verify_site_exists(netbox, site_name):
-    """
-    Verify that the specified site exists in NetBox
-    
-    Args:
-        netbox: NetBox client instance
-        site_name: Name of site to verify
-        
-    Returns:
-        bool: True if site exists or if site_name is None, False otherwise
-    """
+    """Verify that the specified site exists in NetBox"""
     if not site_name:
-        return True  # No site filter, proceed with all
+        return True
     
     sites = netbox.dcim.get_sites(name=site_name)
     if sites:
@@ -42,16 +43,21 @@ def verify_site_exists(netbox, site_name):
         print(f"ERROR: Target site '{site_name}' not found in NetBox")
         return False
 
-def main():
-    """Main migration function"""
-    # Initialize NetBox connection
-    netbox = NetBox(host=NB_HOST, port=NB_PORT, use_ssl=NB_USE_SSL, auth_token=NB_TOKEN)
-    
-    # Check if target site exists when site filtering is enabled
-    if not verify_site_exists(netbox, TARGET_SITE):
-        print("Migration aborted: Target site not found")
-        return
-    
+def setup_custom_fields():
+    """Run custom fields setup script"""
+    try:
+        script_path = os.path.join(BASE_DIR, "migration", "set_custom_fields.py")
+        spec = importlib.util.spec_from_file_location("set_custom_fields", script_path)
+        custom_fields = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(custom_fields)
+        custom_fields.main()
+        return True
+    except Exception as e:
+        print(f"Error setting up custom fields: {e}")
+        return False
+
+def run_base_migration(netbox):
+    """Run the basic migration components"""
     # Create standard tags
     global_tags = set(tag['name'] for tag in netbox.extras.get_tags())
     create_global_tags(netbox, (IPV4_TAG, IPV6_TAG))
@@ -65,37 +71,37 @@ def main():
     
     # Process components according to flags
     if CREATE_VLAN_GROUPS:
-        import racktables_netbox_migration.vlans as vlans
+        import migration.vlans as vlans
         vlans.create_vlan_groups(netbox)
     
     if CREATE_VLANS:
-        import racktables_netbox_migration.vlans as vlans
+        import migration.vlans as vlans
         vlans.create_vlans(netbox)
     
     if CREATE_MOUNTED_VMS or CREATE_UNMOUNTED_VMS:
-        import racktables_netbox_migration.vms as vms
+        import migration.vms as vms
         vms.create_vms(netbox, CREATE_MOUNTED_VMS, CREATE_UNMOUNTED_VMS)
     
     if CREATE_RACKED_DEVICES:
-        import racktables_netbox_migration.devices as devices
-        import racktables_netbox_migration.sites as sites
+        import migration.devices as devices
+        import migration.sites as sites
         sites.create_sites_and_racks(netbox)
         devices.create_racked_devices(netbox)
     
     if CREATE_NON_RACKED_DEVICES:
-        import racktables_netbox_migration.devices as devices
+        import migration.devices as devices
         devices.create_non_racked_devices(netbox)
     
     if CREATE_INTERFACES:
-        import racktables_netbox_migration.interfaces as interfaces
+        import migration.interfaces as interfaces
         interfaces.create_interfaces(netbox)
     
     if CREATE_INTERFACE_CONNECTIONS:
-        import racktables_netbox_migration.interfaces as interfaces
+        import migration.interfaces as interfaces
         interfaces.create_interface_connections(netbox)
     
     if CREATE_IPV4 or CREATE_IPV6:
-        import racktables_netbox_migration.ips as ips
+        import migration.ips as ips
         versions = []
         if CREATE_IPV4:
             versions.append("4")
@@ -113,6 +119,112 @@ def main():
                 ips.create_ip_not_allocated(netbox, IP, TARGET_SITE)
     
     print("Base migration completed successfully!")
+    return True
+
+def run_extended_migration(netbox):
+    """Run the additional migration components"""
+    with get_db_connection() as connection:
+        with get_cursor(connection) as cursor:
+            if CREATE_PATCH_CABLES:
+                from migration.extended.patch_cables import migrate_patch_cables
+                migrate_patch_cables(cursor, netbox)
+            
+            if CREATE_FILES:
+                from migration.extended.files import migrate_files
+                migrate_files(cursor, netbox)
+                
+            if CREATE_VIRTUAL_SERVICES:
+                from migration.extended.services import migrate_virtual_services
+                migrate_virtual_services(cursor, netbox)
+                
+            if CREATE_NAT_MAPPINGS:
+                from migration.extended.nat import migrate_nat_mappings
+                migrate_nat_mappings(cursor, netbox)
+                
+            if CREATE_LOAD_BALANCING:
+                from migration.extended.load_balancer import migrate_load_balancing
+                migrate_load_balancing(cursor, netbox)
+                
+            if CREATE_MONITORING_DATA:
+                from migration.extended.monitoring import migrate_monitoring
+                migrate_monitoring(cursor, netbox)
+    
+    # Create available subnets after all other migration steps
+    if CREATE_AVAILABLE_SUBNETS:
+        from migration.extended.available_subnets import create_available_subnets
+        create_available_subnets(netbox)
+    
+    print("Extended migration completed successfully!")
+    return True
+
+def main():
+    """Main migration function"""
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Set up logging
+    log_filename = f"migration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # Set target site if specified
+    if args.site:
+        global TARGET_SITE
+        TARGET_SITE = args.site
+        logging.info(f"Filtering migration for site: {TARGET_SITE}")
+    
+    # Load custom config if specified
+    if args.config:
+        if os.path.exists(args.config):
+            try:
+                exec(open(args.config).read())
+                logging.info(f"Loaded custom configuration from {args.config}")
+            except Exception as e:
+                logging.error(f"Error loading config: {e}")
+                return False
+        else:
+            logging.error(f"Config file not found: {args.config}")
+            return False
+    
+    # Set up custom fields if not skipped
+    if not args.skip_custom_fields:
+        logging.info("Setting up custom fields...")
+        if not setup_custom_fields():
+            logging.warning("Custom fields setup had errors. Continuing with migration...")
+    
+    # Initialize NetBox connection
+    logging.info("Initializing NetBox connection...")
+    netbox = NetBox(host=NB_HOST, port=NB_PORT, use_ssl=NB_USE_SSL, auth_token=NB_TOKEN)
+    
+    # Verify site exists
+    if not verify_site_exists(netbox, TARGET_SITE):
+        logging.error("Migration aborted: Target site not found")
+        return False
+    
+    # Run migrations based on arguments
+    success = True
+    
+    if not args.extended_only:
+        logging.info("Starting base migration...")
+        success = run_base_migration(netbox) and success
+    
+    if not args.basic_only:
+        logging.info("Starting extended migration...")
+        success = run_extended_migration(netbox) and success
+    
+    if success:
+        logging.info("Migration completed successfully!")
+    else:
+        logging.error("Migration completed with errors. Check log for details.")
+    
+    return success
 
 if __name__ == "__main__":
-    main()
+    success = main()
+    sys.exit(0 if success else 1)
