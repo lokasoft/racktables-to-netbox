@@ -21,10 +21,21 @@ def create_ip_ranges_from_available_prefixes(netbox):
     # Find prefixes with Available tag
     for prefix in all_prefixes:
         has_available_tag = False
-        for tag in getattr(prefix, 'tags', []):
-            if hasattr(tag, 'name') and tag.name == 'Available':
-                has_available_tag = True
-                break
+        
+        # Handle both dictionary and object responses for tags
+        if isinstance(prefix, dict):
+            tags = prefix.get('tags', [])
+            for tag in tags:
+                if isinstance(tag, dict) and tag.get('name') == 'Available':
+                    has_available_tag = True
+                    break
+        else:
+            tags = getattr(prefix, 'tags', [])
+            for tag in tags:
+                tag_name = tag.get('name', '') if isinstance(tag, dict) else getattr(tag, 'name', '')
+                if tag_name == 'Available':
+                    has_available_tag = True
+                    break
                 
         if has_available_tag:
             available_prefixes.append(prefix)
@@ -34,17 +45,24 @@ def create_ip_ranges_from_available_prefixes(netbox):
     # Get existing IP ranges to avoid duplicates
     existing_ranges = netbox.ipam.get_ip_ranges()
     existing_range_cidrs = set()
+    
     for ip_range in existing_ranges:
-        if hasattr(ip_range, 'start_address') and hasattr(ip_range, 'end_address'):
-            start_ip = ip_range.start_address.split('/')[0] if ip_range.start_address else None
-            end_ip = ip_range.end_address.split('/')[0] if ip_range.end_address else None
-            if start_ip and end_ip:
-                existing_range_cidrs.add(f"{start_ip}-{end_ip}")
+        # Handle both dictionary and object responses
+        if isinstance(ip_range, dict):
+            start_ip = ip_range.get('start_address', '').split('/')[0] if ip_range.get('start_address') else None
+            end_ip = ip_range.get('end_address', '').split('/')[0] if ip_range.get('end_address') else None
+        else:
+            start_ip = getattr(ip_range, 'start_address', '').split('/')[0] if getattr(ip_range, 'start_address', None) else None
+            end_ip = getattr(ip_range, 'end_address', '').split('/')[0] if getattr(ip_range, 'end_address', None) else None
+            
+        if start_ip and end_ip:
+            existing_range_cidrs.add(f"{start_ip}-{end_ip}")
     
     ranges_created = 0
     
     for prefix in available_prefixes:
-        prefix_str = prefix.prefix
+        # Handle both dictionary and object responses
+        prefix_str = prefix['prefix'] if isinstance(prefix, dict) else prefix.prefix
         prefix_obj = ipaddress.ip_network(prefix_str)
         
         # Skip very small prefixes
@@ -92,12 +110,18 @@ def create_ip_ranges(netbox):
     # Get existing IP ranges to avoid duplicates
     existing_ranges = netbox.ipam.get_ip_ranges()
     existing_range_cidrs = set()
+    
     for ip_range in existing_ranges:
-        if hasattr(ip_range, 'start_address') and hasattr(ip_range, 'end_address'):
-            start_ip = ip_range.start_address.split('/')[0] if ip_range.start_address else None
-            end_ip = ip_range.end_address.split('/')[0] if ip_range.end_address else None
-            if start_ip and end_ip:
-                existing_range_cidrs.add(f"{start_ip}-{end_ip}")
+        # Handle both dictionary and object responses
+        if isinstance(ip_range, dict):
+            start_ip = ip_range.get('start_address', '').split('/')[0] if ip_range.get('start_address') else None
+            end_ip = ip_range.get('end_address', '').split('/')[0] if ip_range.get('end_address') else None
+        else:
+            start_ip = getattr(ip_range, 'start_address', '').split('/')[0] if getattr(ip_range, 'start_address', None) else None
+            end_ip = getattr(ip_range, 'end_address', '').split('/')[0] if getattr(ip_range, 'end_address', None) else None
+            
+        if start_ip and end_ip:
+            existing_range_cidrs.add(f"{start_ip}-{end_ip}")
     
     print(f"Found {len(existing_ranges)} existing IP ranges")
     
@@ -106,7 +130,9 @@ def create_ip_ranges(netbox):
     standalone_prefixes = []
     
     for prefix in prefixes:
-        prefix_net = ipaddress.ip_network(prefix.prefix)
+        # Handle both dictionary and object responses
+        prefix_str = prefix['prefix'] if isinstance(prefix, dict) else prefix.prefix
+        prefix_net = ipaddress.ip_network(prefix_str)
         parent_found = False
         
         # Skip very small prefixes for analysis
@@ -117,19 +143,22 @@ def create_ip_ranges(netbox):
         
         # Find parent prefix
         for potential_parent in prefixes:
-            if prefix.prefix == potential_parent.prefix:
+            # Handle both dictionary and object responses
+            parent_str = potential_parent['prefix'] if isinstance(potential_parent, dict) else potential_parent.prefix
+            
+            if prefix_str == parent_str:
                 continue
                 
-            parent_net = ipaddress.ip_network(potential_parent.prefix)
+            parent_net = ipaddress.ip_network(parent_str)
             
             # Skip if potential parent has same or higher prefix length
             if parent_net.prefixlen >= prefix_net.prefixlen:
                 continue
                 
             if prefix_net.subnet_of(parent_net):
-                if potential_parent.prefix not in network_groups:
-                    network_groups[potential_parent.prefix] = []
-                network_groups[potential_parent.prefix].append(prefix)
+                if parent_str not in network_groups:
+                    network_groups[parent_str] = []
+                network_groups[parent_str].append(prefix)
                 parent_found = True
                 break
         
@@ -144,13 +173,17 @@ def create_ip_ranges(netbox):
             parent = ipaddress.ip_network(parent_prefix)
             
             # Sort child prefixes by network address
-            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x.prefix).network_address)
+            child_prefixes.sort(key=lambda x: ipaddress.ip_network(
+                x['prefix'] if isinstance(x, dict) else x.prefix
+            ).network_address)
             
             # Process gaps between child prefixes
             prev_end = None
             
             for i, child in enumerate(child_prefixes):
-                current = ipaddress.ip_network(child.prefix)
+                # Handle both dictionary and object responses
+                child_str = child['prefix'] if isinstance(child, dict) else child.prefix
+                current = ipaddress.ip_network(child_str)
                 current_start = int(current.network_address)
                 
                 # If this is not the first prefix and there's a gap
@@ -206,16 +239,20 @@ def create_ip_ranges(netbox):
     # Process standalone prefixes
     for prefix in standalone_prefixes:
         try:
-            network = ipaddress.ip_network(prefix.prefix)
+            # Handle both dictionary and object responses
+            prefix_str = prefix['prefix'] if isinstance(prefix, dict) else prefix.prefix
+            network = ipaddress.ip_network(prefix_str)
             
             # Check for addresses within this prefix
             contained_addresses = []
             for ip in ip_addresses:
                 try:
-                    addr = ipaddress.ip_address(ip.address.split('/')[0])
+                    # Handle both dictionary and object responses
+                    ip_addr_str = ip['address'] if isinstance(ip, dict) else ip.address
+                    addr = ipaddress.ip_address(ip_addr_str.split('/')[0])
                     if addr in network:
                         contained_addresses.append(addr)
-                except ValueError:
+                except (ValueError, AttributeError):
                     continue
             
             if not contained_addresses:
@@ -306,6 +343,7 @@ def create_ip_ranges(netbox):
                             error_log(f"Error creating IP range {start_ip} - {end_ip}: {str(e)}")
         
         except Exception as e:
-            error_log(f"Error processing standalone prefix {prefix.prefix}: {str(e)}")
+            prefix_str = prefix['prefix'] if isinstance(prefix, dict) else getattr(prefix, 'prefix', str(prefix))
+            error_log(f"Error processing standalone prefix {prefix_str}: {str(e)}")
     
     print(f"IP range generation completed. Created {ranges_created} IP ranges.")
