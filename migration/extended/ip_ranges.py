@@ -22,15 +22,16 @@ def create_ip_ranges_from_available_prefixes(netbox):
     existing_ranges = netbox.ipam.get_ip_ranges()
     existing_range_cidrs = set()
     for ip_range in existing_ranges:
-        if ip_range['start_address'] and ip_range['end_address']:
-            start_ip = ip_range['start_address'].split('/')[0]
-            end_ip = ip_range['end_address'].split('/')[0]
-            existing_range_cidrs.add(f"{start_ip}-{end_ip}")
+        if hasattr(ip_range, 'start_address') and hasattr(ip_range, 'end_address'):
+            start_ip = ip_range.start_address.split('/')[0] if ip_range.start_address else None
+            end_ip = ip_range.end_address.split('/')[0] if ip_range.end_address else None
+            if start_ip and end_ip:
+                existing_range_cidrs.add(f"{start_ip}-{end_ip}")
     
     ranges_created = 0
     
     for prefix in available_prefixes:
-        prefix_str = prefix['prefix']
+        prefix_str = prefix.prefix
         prefix_obj = ipaddress.ip_network(prefix_str)
         
         # Skip very small prefixes
@@ -39,8 +40,9 @@ def create_ip_ranges_from_available_prefixes(netbox):
             
         # Check if this was created from API detection
         api_detected = False
-        for tag in prefix.get('tags', []):
-            if tag['name'] == 'API-Detected':
+        tags = getattr(prefix, 'tags', [])
+        for tag in tags:
+            if hasattr(tag, 'name') and tag.name == 'API-Detected':
                 api_detected = True
                 break
                 
