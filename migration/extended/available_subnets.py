@@ -31,16 +31,19 @@ def create_available_prefixes(netbox):
     # Get all possible parent prefixes - don't filter too strictly
     for p in existing_prefixes:
         try:
-            if not hasattr(p, 'prefix') or not p.prefix:
+            # Handle both dictionary and object responses
+            prefix_str = p['prefix'] if isinstance(p, dict) else p.prefix
+            if not prefix_str:
                 continue
                 
-            network = ipaddress.ip_network(p.prefix)
+            network = ipaddress.ip_network(prefix_str)
             
             # Include all IPv4 networks with less than /24 mask
             if isinstance(network, ipaddress.IPv4Network) and network.prefixlen < 24:
                 parent_prefixes.append(p)
         except Exception as e:
-            prefix_str = getattr(p, 'prefix', 'unknown')
+            # Get prefix for error message
+            prefix_str = p['prefix'] if isinstance(p, dict) else getattr(p, 'prefix', 'unknown')
             error_log(f"Error processing potential parent prefix {prefix_str}: {str(e)}")
     
     print(f"Found {len(parent_prefixes)} potential parent prefixes")
@@ -48,8 +51,9 @@ def create_available_prefixes(netbox):
     
     # Process each parent to find available subnets
     for parent in parent_prefixes:
-        parent_id = parent.id
-        parent_prefix = parent.prefix
+        # Handle both dictionary and object responses
+        parent_id = parent['id'] if isinstance(parent, dict) else parent.id
+        parent_prefix = parent['prefix'] if isinstance(parent, dict) else parent.prefix
         
         # Get available prefixes from API
         available_url = f"{api_url}/ipam/prefixes/{parent_id}/available-prefixes/"
@@ -117,7 +121,9 @@ def create_available_subnets(netbox):
     network_groups = {}
     for prefix in existing_prefixes:
         try:
-            network = ipaddress.ip_network(prefix.prefix)
+            # Handle both dictionary and object responses
+            prefix_str = prefix['prefix'] if isinstance(prefix, dict) else prefix.prefix
+            network = ipaddress.ip_network(prefix_str)
             
             # Skip very small networks
             if network.prefixlen >= 30 and isinstance(network, ipaddress.IPv4Network):
@@ -128,7 +134,9 @@ def create_available_subnets(netbox):
             # Find the smallest containing prefix
             parent_prefix = None
             for potential_parent in existing_prefixes:
-                parent_network = ipaddress.ip_network(potential_parent.prefix)
+                # Handle both dictionary and object responses
+                parent_str = potential_parent['prefix'] if isinstance(potential_parent, dict) else potential_parent.prefix
+                parent_network = ipaddress.ip_network(parent_str)
                 
                 # Skip if same prefix or if potential parent is same/smaller
                 if str(network) == str(parent_network) or parent_network.prefixlen >= network.prefixlen:
@@ -136,7 +144,7 @@ def create_available_subnets(netbox):
                     
                 if network.subnet_of(parent_network):
                     if not parent_prefix or ipaddress.ip_network(parent_prefix).prefixlen > parent_network.prefixlen:
-                        parent_prefix = potential_parent.prefix
+                        parent_prefix = parent_str
             
             # Group by parent prefix
             if parent_prefix:
@@ -144,7 +152,9 @@ def create_available_subnets(netbox):
                     network_groups[parent_prefix] = []
                 network_groups[parent_prefix].append(prefix)
         except Exception as e:
-            error_log(f"Error processing prefix {prefix.prefix}: {str(e)}")
+            # Get prefix for error message
+            prefix_str = prefix['prefix'] if isinstance(prefix, dict) else getattr(prefix, 'prefix', str(prefix))
+            error_log(f"Error processing prefix {prefix_str}: {str(e)}")
     
     # Track created available subnets
     available_count = 0
@@ -155,14 +165,18 @@ def create_available_subnets(netbox):
             parent = ipaddress.ip_network(parent_prefix)
             
             # Sort child prefixes by network address
-            child_prefixes.sort(key=lambda x: ipaddress.ip_network(x.prefix).network_address)
+            child_prefixes.sort(key=lambda x: ipaddress.ip_network(
+                x['prefix'] if isinstance(x, dict) else x.prefix
+            ).network_address)
             
             # Track previous network end
             prev_end = int(parent.network_address)
             
             # Find gaps between consecutive prefixes
             for child in child_prefixes:
-                child_net = ipaddress.ip_network(child.prefix)
+                # Handle both dictionary and object responses
+                child_str = child['prefix'] if isinstance(child, dict) else child.prefix
+                child_net = ipaddress.ip_network(child_str)
                 start = int(child_net.network_address)
                 
                 # If there's a gap between previous end and current start
