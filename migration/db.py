@@ -1,8 +1,8 @@
 """
 Database helper functions for accessing Racktables data
 """
-from racktables_netbox_migration.utils import get_db_connection, get_cursor
-from racktables_netbox_migration.config import INTERFACE_NAME_MAPPINGS
+from migration.utils import get_db_connection, get_cursor
+from migration.config import INTERFACE_NAME_MAPPINGS
 
 def getRackHeight(rackId):
     """
@@ -135,7 +135,7 @@ def getDeviceType(objtype_id):
             result = cursor.fetchone()
             return result["dict_value"] if result else None
 
-def get_custom_fields(racktables_object_id, slugified_attributes, initial_dict=None):
+def get_custom_fields(racktables_object_id, slugified_attributes=None, initial_dict=None):
     """
     Get all custom field values for a given object
 
@@ -148,6 +148,9 @@ def get_custom_fields(racktables_object_id, slugified_attributes, initial_dict=N
         dict: Dictionary of custom field values
     """
     custom_fields = initial_dict if initial_dict else dict()
+    
+    if slugified_attributes is None:
+        slugified_attributes = {}
 
     with get_db_connection() as connection:
         with get_cursor(connection) as cursor:
