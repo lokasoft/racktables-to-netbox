@@ -10,9 +10,10 @@ import importlib.util
 import logging
 from datetime import datetime
 
-# Setup directory-based imports that work without package installation
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, BASE_DIR)
+# Add parent directory to path to allow running directly
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, ROOT_DIR)
 
 # Import core modules
 from migration.config import *
