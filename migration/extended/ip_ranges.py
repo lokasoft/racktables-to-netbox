@@ -14,34 +14,19 @@ def create_ip_ranges_from_available_prefixes(netbox):
     """
     print("\nCreating IP ranges from available prefixes...")
     
-    # Get all prefixes first
+    # Get all prefixes with Available tag
     all_prefixes = netbox.ipam.get_ip_prefixes()
     available_prefixes = []
     
-    # A prefix is available only if it has no attributes set except for the prefix itself
+    # Find prefixes with Available tag
     for prefix in all_prefixes:
-        # Check if it has tags, description, vrf, role, tenant, or other attributes
-        has_description = bool(getattr(prefix, 'description', '').strip())
-        has_vrf = getattr(prefix, 'vrf', None) is not None
-        has_role = getattr(prefix, 'role', None) is not None
-        has_tenant = getattr(prefix, 'tenant', None) is not None
-        has_tags = len(getattr(prefix, 'tags', [])) > 0
-        has_prefix_name = False
-        
-        # Check custom fields for Prefix_name
-        custom_fields = getattr(prefix, 'custom_fields', {})
-        if isinstance(custom_fields, dict) and custom_fields.get('Prefix_Name'):
-            has_prefix_name = True
-        
-        # Only consider it available if it has the Available tag
         has_available_tag = False
         for tag in getattr(prefix, 'tags', []):
             if hasattr(tag, 'name') and tag.name == 'Available':
                 has_available_tag = True
                 break
-        
-        # Must have Available tag and no other attributes
-        if has_available_tag and not (has_description or has_vrf or has_role or has_tenant or has_prefix_name):
+                
+        if has_available_tag:
             available_prefixes.append(prefix)
     
     print(f"Found {len(available_prefixes)} available prefixes")
@@ -66,14 +51,6 @@ def create_ip_ranges_from_available_prefixes(netbox):
         if prefix_obj.prefixlen >= 30 and isinstance(prefix_obj, ipaddress.IPv4Network):
             continue
             
-        # Check if this was created from API detection
-        api_detected = False
-        tags = getattr(prefix, 'tags', [])
-        for tag in tags:
-            if hasattr(tag, 'name') and tag.name == 'API-Detected':
-                api_detected = True
-                break
-                
         # Create an IP range for the whole prefix
         start_ip = prefix_obj.network_address
         end_ip = prefix_obj.broadcast_address
