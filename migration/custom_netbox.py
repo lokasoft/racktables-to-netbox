@@ -205,6 +205,18 @@ class IpamWrapper:
     def get_vlan_groups(self, **kwargs):
         """Get VLAN groups with optional filters"""
         return self.nb.ipam.vlan_groups.filter(**kwargs)
+        
+    def create_ip_range(self, start_address, end_address, **kwargs):
+        """Create a new IP range"""
+        return self.nb.ipam.ip_ranges.create(
+            start_address=start_address,
+            end_address=end_address,
+            **kwargs
+        )
+
+    def get_ip_ranges(self, **kwargs):
+        """Get IP ranges with optional filters"""
+        return self.nb.ipam.ip_ranges.filter(**kwargs)
 
     def create_vlan(self, vid, vlan_name, **kwargs):
         """Create a new VLAN"""
