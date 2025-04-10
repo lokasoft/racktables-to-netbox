@@ -72,12 +72,14 @@ class DcimWrapper:
         params = {
             'name': name,
             'device_type': device_type.id if hasattr(device_type, 'id') else device_type,
-            'role': device_role.id if hasattr(device_role, 'id') else device_role, # Changed from device_role to role
+            'role': device_role.id if hasattr(device_role, 'id') else device_role,
             'site': site.id if site else site_name
         }
 
         # Add any additional keyword arguments
         params.update(kwargs)
+
+        return self.nb.dcim.devices.create(**params)
 
     def create_device_role(self, name, color, slug, **kwargs):
         """Create a new device role"""
