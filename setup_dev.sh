@@ -206,6 +206,21 @@ setup_gitclone() {
         return 1
     fi
     
+    # Create temporary directory and clone there if current dir isn't empty
+    if [ "$(ls -A | grep -v 'venv\|netbox-docker\|setup-dev.sh\|requirements.txt\|.netbox_creds')" ]; then
+        TEMP_DIR="racktables-migration"
+        mkdir -p $TEMP_DIR
+        echo "Current directory not empty, cloning to $TEMP_DIR..."
+        git clone https://github.com/enoch85/racktables-to-netbox.git $TEMP_DIR
+        echo "Moving files from $TEMP_DIR to current directory..."
+        mv $TEMP_DIR/* $TEMP_DIR/.* . 2>/dev/null || true
+        rmdir $TEMP_DIR
+    else
+        # Current directory is empty or only contains expected files
+        echo "Cloning the repository to current directory..."
+        git clone https://github.com/enoch85/racktables-to-netbox.git .
+    fi
+    
     # Create virtual environment if not already in one
     if [[ -z "$VIRTUAL_ENV" ]]; then
         echo "Creating virtual environment..."
@@ -216,188 +231,31 @@ setup_gitclone() {
         source venv/bin/activate
     fi
     
-    # Create requirements.txt if it doesn't exist
-    if [ ! -f "requirements.txt" ]; then
-        echo "Creating requirements.txt..."
-        cat > requirements.txt << EOF
-pynetbox>=6.6.0
-python-slugify>=5.0.0
-pymysql>=1.0.0
-ipaddress>=1.0.0
-requests>=2.25.0
-beautifulsoup4>=4.9.0
-EOF
-    fi
-    
-    # Install dependencies
+    # Install dependencies and development mode
     echo "Installing dependencies..."
     pip install -r requirements.txt
+    echo "Installing package in development mode..."
+    pip install -e .
     
-    # Create necessary directories if they don't exist
-    echo "Creating package structure..."
-    mkdir -p migration/extended
-    mkdir -p migration/const
+    # Get NetBox credentials if available
+    NB_HOST="localhost"
+    NB_PORT="8000"
+    NB_TOKEN="0123456789abcdef0123456789abcdef01234567"
     
-    # Copy files if missing
-    if [ ! -f "migration/__init__.py" ]; then
-        echo "Creating migration/__init__.py file..."
-        echo '"""Racktables to NetBox Migration Tool"""' > migration/__init__.py
-        echo '' >> migration/__init__.py
-        echo '__version__ = "1.0.0"' >> migration/__init__.py
-    fi
-    
-    if [ ! -f "migration/extended/__init__.py" ]; then
-        echo "Creating extended package __init__.py file..."
-        echo '"""Extended migration components for additional Racktables data"""' > migration/extended/__init__.py
-    fi
-    
-    # Create const modules
-    if [ ! -f "migration/const/__init__.py" ]; then
-        echo "Creating const package structure..."
-        echo '"""Constants for migration tool"""' > migration/const/__init__.py
-    fi
-    
-    # Create flags.py
-    cat > migration/const/flags.py << EOF
-"""Migration flags constants"""
-
-class MigrationFlags:
-    """Constants for migration flags"""
-    CREATE_VLAN_GROUPS = "CREATE_VLAN_GROUPS"
-    CREATE_VLANS = "CREATE_VLANS"
-    CREATE_MOUNTED_VMS = "CREATE_MOUNTED_VMS"
-    CREATE_UNMOUNTED_VMS = "CREATE_UNMOUNTED_VMS"
-    CREATE_RACKED_DEVICES = "CREATE_RACKED_DEVICES"
-    CREATE_NON_RACKED_DEVICES = "CREATE_NON_RACKED_DEVICES"
-    CREATE_INTERFACES = "CREATE_INTERFACES"
-    CREATE_INTERFACE_CONNECTIONS = "CREATE_INTERFACE_CONNECTIONS"
-    CREATE_IPV4 = "CREATE_IPV4"
-    CREATE_IPV6 = "CREATE_IPV6"
-    CREATE_IP_NETWORKS = "CREATE_IP_NETWORKS"
-    CREATE_IP_ALLOCATED = "CREATE_IP_ALLOCATED"
-    CREATE_IP_NOT_ALLOCATED = "CREATE_IP_NOT_ALLOCATED"
-    CREATE_PATCH_CABLES = "CREATE_PATCH_CABLES"
-    CREATE_FILES = "CREATE_FILES"
-    CREATE_VIRTUAL_SERVICES = "CREATE_VIRTUAL_SERVICES"
-    CREATE_NAT_MAPPINGS = "CREATE_NAT_MAPPINGS"
-    CREATE_LOAD_BALANCING = "CREATE_LOAD_BALANCING"
-    CREATE_MONITORING_DATA = "CREATE_MONITORING_DATA"
-    CREATE_AVAILABLE_SUBNETS = "CREATE_AVAILABLE_SUBNETS"
-EOF
-    
-    # Create global_config.py
-    cat > migration/const/global_config.py << EOF
-"""Global configuration constants"""
-
-class NetBoxConfig:
-    """Constants for NetBox configuration"""
-    HOST_ENV_VAR = "NETBOX_HOST"
-    PORT_ENV_VAR = "NETBOX_PORT"
-    TOKEN_ENV_VAR = "NETBOX_TOKEN"
-    SSL_ENV_VAR = "NETBOX_USE_SSL"
-    DEFAULT_HOST = "localhost"
-    DEFAULT_PORT = 8000
-    DEFAULT_TOKEN = "0123456789abcdef0123456789abcdef01234567"
-    DEFAULT_SSL = False
-
-class DatabaseConfig:
-    """Constants for database configuration"""
-    HOST_ENV_VAR = "RACKTABLES_DB_HOST"
-    PORT_ENV_VAR = "RACKTABLES_DB_PORT"
-    USER_ENV_VAR = "RACKTABLES_DB_USER"
-    PASSWORD_ENV_VAR = "RACKTABLES_DB_PASSWORD"
-    NAME_ENV_VAR = "RACKTABLES_DB_NAME"
-    DEFAULT_PORT = 3306
-    DEFAULT_CHARSET = "utf8mb4"
-
-class TagConfig:
-    """Constants for tag configuration"""
-    IPV4_TAG = "IPv4"
-    IPV6_TAG = "IPv6"
-EOF
-    
-    # Create config.py from template if it doesn't exist
-    if [ ! -f "migration/config.py" ]; then
-        echo "Creating config.py with NetBox credentials..."
+    if [ -f ".netbox_creds" ]; then
+        echo "Using NetBox credentials from setup"
+        source .netbox_creds
+        NB_HOST="${NETBOX_HOST}"
+        NB_PORT="${NETBOX_PORT}"
+        NB_TOKEN="${NETBOX_TOKEN}"
         
-        # Check if NetBox credentials file exists
-        NB_HOST="localhost"
-        NB_PORT="8000"
-        NB_TOKEN="0123456789abcdef0123456789abcdef01234567"
-        
-        if [ -f ".netbox_creds" ]; then
-            echo "Using NetBox credentials from setup"
-            source .netbox_creds
-            NB_HOST="${NETBOX_HOST}"
-            NB_PORT="${NETBOX_PORT}"
-            NB_TOKEN="${NETBOX_TOKEN}"
+        # Update config.py with correct API token
+        if [ -f "migration/config.py" ]; then
+            sed -i "s/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '[^']*')/NB_TOKEN = os.environ.get('NETBOX_TOKEN', '${NB_TOKEN}')/" migration/config.py
+            sed -i "s/NB_HOST = os.environ.get('NETBOX_HOST', '[^']*')/NB_HOST = os.environ.get('NETBOX_HOST', '${NB_HOST}')/" migration/config.py
+            sed -i "s/NB_PORT = int(os.environ.get('NETBOX_PORT', '[^']*'))/NB_PORT = int(os.environ.get('NETBOX_PORT', '${NB_PORT}'))/" migration/config.py
+            echo "Updated config.py with NetBox credentials"
         fi
-        
-        cat > migration/config.py << EOF
-"""
-Global configuration settings for the Racktables to NetBox migration tool
-"""
-from pymysql.cursors import DictCursor
-import os
-import ipaddress
-from migration.const.flags import MigrationFlags
-from migration.const.global_config import NetBoxConfig, DatabaseConfig, TagConfig
-
-# Migration flags - control which components are processed
-CREATE_VLAN_GROUPS =           True
-CREATE_VLANS =                 True
-CREATE_MOUNTED_VMS =           True
-CREATE_UNMOUNTED_VMS =         True
-CREATE_RACKED_DEVICES =        True
-CREATE_NON_RACKED_DEVICES =    True
-CREATE_INTERFACES =            True
-CREATE_INTERFACE_CONNECTIONS = True
-CREATE_IPV4 =                  True
-CREATE_IPV6 =                  True
-CREATE_IP_NETWORKS =           True
-CREATE_IP_ALLOCATED =          True
-CREATE_IP_NOT_ALLOCATED =      True
-
-# Extended migration flags
-CREATE_PATCH_CABLES =          True
-CREATE_FILES =                 True
-CREATE_VIRTUAL_SERVICES =      True
-CREATE_NAT_MAPPINGS =          True
-CREATE_LOAD_BALANCING =        True
-CREATE_MONITORING_DATA =       True
-CREATE_AVAILABLE_SUBNETS =     True
-
-# Site filtering - set to None to process all sites, or specify a site name to restrict migration
-TARGET_SITE = None  # This can be set via command line args
-TARGET_SITE_ID = None  # Store the numeric ID of the target site
-
-# Whether to store cached data with pickle
-STORE_DATA = True
-
-# NetBox API connection settings - can be overridden with environment variables
-NB_HOST = os.environ.get('NETBOX_HOST', '${NB_HOST}')
-NB_PORT = int(os.environ.get('NETBOX_PORT', '${NB_PORT}'))
-NB_TOKEN = os.environ.get('NETBOX_TOKEN', '${NB_TOKEN}')
-NB_USE_SSL = os.environ.get('NETBOX_USE_SSL', 'False').lower() in ('true', '1', 'yes')
-
-# Database connection parameters - can be overridden with environment variables
-DB_CONFIG = {
-    'host': os.environ.get('RACKTABLES_DB_HOST', ''),  # Add your DB host here
-    'port': int(os.environ.get('RACKTABLES_DB_PORT', '3306')),
-    'user': os.environ.get('RACKTABLES_DB_USER', ''),  # Add your DB user here
-    'password': os.environ.get('RACKTABLES_DB_PASSWORD', ''),  # Add your DB password here
-    'db': os.environ.get('RACKTABLES_DB_NAME', ''),  # Add your DB name here
-    'charset': 'utf8mb4',
-    'cursorclass': DictCursor
-}
-
-# Common tags
-IPV4_TAG = TagConfig.IPV4_TAG
-IPV6_TAG = TagConfig.IPV6_TAG
-EOF
-        
-        echo "Created config.py with NetBox connection details"
-        echo "Please update database connection settings in migration/config.py"
     fi
     
     echo "Git clone setup complete!"
