@@ -180,13 +180,23 @@ def run_extended_migration(netbox):
                 from migration.extended.monitoring import migrate_monitoring
                 migrate_monitoring(cursor, netbox)
     
-    # Create available subnets after all other migration steps
+    # Create available subnets
     if CREATE_AVAILABLE_SUBNETS:
+        # First use the API-based approach to get accurate available prefixes
+        from migration.extended.available_subnets import create_available_prefixes
+        create_available_prefixes(netbox)
+        
+        # Then use the algorithmic approach as a fallback
         from migration.extended.available_subnets import create_available_subnets
         create_available_subnets(netbox)
     
     # Generate IP ranges based on imported IP data
     if CREATE_IP_RANGES:
+        # First create IP ranges from API-detected available prefixes
+        from migration.extended.ip_ranges import create_ip_ranges_from_available_prefixes
+        create_ip_ranges_from_available_prefixes(netbox)
+        
+        # Then create ranges from algorithmic detection
         from migration.extended.ip_ranges import create_ip_ranges
         create_ip_ranges(netbox)
     
