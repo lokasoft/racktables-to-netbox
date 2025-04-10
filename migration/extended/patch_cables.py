@@ -137,19 +137,24 @@ def migrate_patch_cables(cursor, netbox):
     end1_conn_id_field = pch_columns.get('end1_conn_id', 'end1_conn_id')
     end2_conn_id_field = pch_columns.get('end2_conn_id', 'end2_conn_id')
     length_field = pch_columns.get('length', 'length')
-    color_field = pch_columns.get('color', 'color')
+    color_field = pch_columns.get('color', 'color') if 'color' in pch_columns else None
     description_field = pch_columns.get('description', 'description')
     
     # Get connections from the Link table
     try:
+        # Build query based on available columns
         query = f"""
             SELECT L.porta, L.portb, L.cable, C.{pctype_id_field}, 
                    C.{end1_conn_id_field}, C.{end2_conn_id_field}, 
-                   C.{length_field}, C.{color_field}, C.{description_field} 
-            FROM Link L
-            JOIN PatchCableHeap C ON L.cable = C.id
-            WHERE L.cable IS NOT NULL
-        """
+                   C.{length_field}"""
+        
+        # Add color if it exists
+        if color_field:
+            query += f", C.{color_field}"
+            
+        # Add description if it exists
+        query += f", C.{description_field} FROM Link L JOIN PatchCableHeap C ON L.cable = C.id WHERE L.cable IS NOT NULL"
+        
         cursor.execute(query)
         link_connections = cursor.fetchall()
         print(f"Found {len(link_connections)} cable connections")
@@ -189,7 +194,7 @@ def migrate_patch_cables(cursor, netbox):
                 end1_conn_id = connection[end1_conn_id_field]
                 end2_conn_id = connection[end2_conn_id_field]
                 length = connection[length_field]
-                color = connection[color_field]
+                color = connection[color_field] if color_field and color_field in connection else None
                 description = connection[description_field]
             except (KeyError, IndexError):
                 # Fallback to numerical indices if column names don't match
@@ -197,8 +202,8 @@ def migrate_patch_cables(cursor, netbox):
                 end1_conn_id = connection.get(4, None)
                 end2_conn_id = connection.get(5, None)
                 length = connection.get(6, None)
-                color = connection.get(7, None)
-                description = connection.get(8, None)
+                color = connection.get(7, None) if color_field else None
+                description = connection.get(8 if color_field else 7, None)
             
             # Get cable type and connector details
             cable_type = cable_types.get(pctype_id, "Unknown") if pctype_id else "Unknown"
@@ -249,6 +254,7 @@ def migrate_patch_cables(cursor, netbox):
             
             except Exception as e:
                 error_log(f"Error creating cable connection: {str(e)}")
+        
         except Exception as e:
             error_log(f"Error processing connection: {str(e)}")
             continue
