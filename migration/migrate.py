@@ -54,13 +54,19 @@ def parse_arguments():
     return parser.parse_args()
 
 def verify_site_exists(netbox, site_name):
-    """Verify that the specified site exists in NetBox"""
+    """Verify that the specified site exists in NetBox and create a matching tag"""
     if not site_name:
         return True
     
     sites = netbox.dcim.get_sites(name=site_name)
     if sites:
         print(f"Target site '{site_name}' found - restricting migration to this site")
+        
+        # Create a tag with the same name as the site
+        from migration.utils import create_global_tags
+        create_global_tags(netbox, [site_name])
+        print(f"Created tag '{site_name}' to match site name")
+        
         return True
     else:
         # Create the site if it doesn't exist
@@ -69,6 +75,12 @@ def verify_site_exists(netbox, site_name):
             print(f"Target site '{site_name}' not found in NetBox, creating it...")
             netbox.dcim.create_site(site_name, slugify(site_name))
             print(f"Created site '{site_name}'")
+            
+            # Create a tag with the same name as the site
+            from migration.utils import create_global_tags
+            create_global_tags(netbox, [site_name])
+            print(f"Created tag '{site_name}' to match site name")
+            
             return True
         except Exception as e:
             print(f"ERROR: Failed to create site '{site_name}': {e}")
