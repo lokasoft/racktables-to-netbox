@@ -61,7 +61,7 @@ def verify_site_exists(netbox, site_name):
     if not site_name:
         return True
     
-    sites = netbox.dcim.get_sites(name=site_name)
+    sites = list(netbox.dcim.get_sites(name=site_name))
     if sites:
         print(f"Target site '{site_name}' found - restricting migration to this site")
         
@@ -71,7 +71,8 @@ def verify_site_exists(netbox, site_name):
         print(f"Created tag '{site_name}' to match site name")
         
         # Store the site ID in the global config
-        TARGET_SITE_ID = sites[0]['id']
+        TARGET_SITE_ID = sites[0].id if hasattr(sites[0], 'id') else sites[0]['id']
+        print(f"Using site ID: {TARGET_SITE_ID}")
         
         return True
     else:
@@ -82,7 +83,8 @@ def verify_site_exists(netbox, site_name):
             new_site = netbox.dcim.create_site(site_name, slugify(site_name))
             
             # Store the site ID in the global config
-            TARGET_SITE_ID = new_site['id']
+            TARGET_SITE_ID = new_site.id if hasattr(new_site, 'id') else new_site['id']
+            print(f"Created site '{site_name}' with ID: {TARGET_SITE_ID}")
             
             # Create a tag with the same name as the site
             from migration.utils import create_global_tags
@@ -101,7 +103,7 @@ def verify_tenant_exists(netbox, tenant_name):
     if not tenant_name:
         return True
     
-    tenants = netbox.tenancy.get_tenants(name=tenant_name)
+    tenants = list(netbox.tenancy.get_tenants(name=tenant_name))
     if tenants:
         print(f"Target tenant '{tenant_name}' found - restricting migration to this tenant")
         
@@ -111,7 +113,7 @@ def verify_tenant_exists(netbox, tenant_name):
         print(f"Created tag '{tenant_name}' to match tenant name")
         
         # Store the tenant ID in the global config
-        TARGET_TENANT_ID = tenants[0]['id']
+        TARGET_TENANT_ID = tenants[0].id if hasattr(tenants[0], 'id') else tenants[0]['id']
         print(f"Using tenant ID: {TARGET_TENANT_ID}")
         
         return True
@@ -123,7 +125,7 @@ def verify_tenant_exists(netbox, tenant_name):
             new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
             
             # Store the tenant ID in the global config
-            TARGET_TENANT_ID = new_tenant['id']
+            TARGET_TENANT_ID = new_tenant.id if hasattr(new_tenant, 'id') else new_tenant['id']
             print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
             
             # Create a tag with the same name as the tenant
