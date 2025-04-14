@@ -13,7 +13,8 @@ from racktables_netbox_migration.db import (
 )
 from racktables_netbox_migration.config import (
     PARENT_OBJTYPE_IDS, OBJTYPE_ID_NAMES, RACKTABLES_MANUFACTURERS,
-    PARENT_CHILD_OBJTYPE_ID_PAIRS, FIRST_ASCII_CHARACTER
+    PARENT_CHILD_OBJTYPE_ID_PAIRS, FIRST_ASCII_CHARACTER,
+    TARGET_TENANT, TARGET_TENANT_ID, TARGET_SITE
 )
 
 # Global tracking of created objects
@@ -124,6 +125,11 @@ def create_device_at_location(netbox, device_name, face, start_height, device_ro
         if asset_no and asset_no in asset_tags:
             asset_no = asset_no + "-1"
 
+        # Add tenant parameter if TARGET_TENANT_ID is specified
+        tenant_param = {}
+        if TARGET_TENANT_ID:
+            tenant_param = {"tenant": TARGET_TENANT_ID}
+
         # Create the device
         try:
             device = netbox.dcim.create_device(
@@ -138,7 +144,8 @@ def create_device_at_location(netbox, device_name, face, start_height, device_ro
                 manufacturer={"name": manufacturer},
                 device_type=device_type_model,
                 site_name=site_name,
-                rack={"name": rack_name}
+                rack={"name": rack_name},
+                **tenant_param  # Add tenant parameter
             )
 
             if asset_no:
@@ -169,7 +176,12 @@ def create_racked_devices(netbox):
     print("Creating racked devices")
 
     # Load existing devices, names, roles, manufacturers, and types
-    global_devices = netbox.dcim.get_devices()
+    # If tenant filtering is enabled, filter devices by tenant
+    device_filters = {}
+    if TARGET_TENANT_ID:
+        device_filters["tenant_id"] = TARGET_TENANT_ID
+    
+    global_devices = netbox.dcim.get_devices(**device_filters)
     print(f"Got {len(global_devices)} existing devices")
 
     global_names = set(device['name'] for device in global_devices)
@@ -185,7 +197,11 @@ def create_racked_devices(netbox):
                 serials[row["object_id"]] = row["string_value"] if row["string_value"] else ""
 
     # Get racks from NetBox
-    racks = netbox.dcim.racks.filter()
+    rack_filters = {}
+    if TARGET_SITE:
+        rack_filters["site"] = TARGET_SITE
+    
+    racks = netbox.dcim.racks.filter(**rack_filters)
 
     # Process each rack and create devices
     for rack in racks:
@@ -370,7 +386,12 @@ def create_parent_child_devices(netbox, data, objtype_id):
     not_created_parents = []
 
     # Get existing data from NetBox
-    existing_device_names = set(device['name'].strip() for device in netbox.dcim.get_devices() if device['name'])
+    # If tenant filtering is enabled, filter devices by tenant
+    device_filters = {}
+    if TARGET_TENANT_ID:
+        device_filters["tenant_id"] = TARGET_TENANT_ID
+        
+    existing_device_names = set(device['name'].strip() for device in netbox.dcim.get_devices(**device_filters) if device['name'])
 
     # Map device bay names by parent device
     existing_device_bays = {}
@@ -458,6 +479,11 @@ def create_parent_child_devices(netbox, data, objtype_id):
         if asset_no and asset_no in asset_tags:
             asset_no = f"{asset_no}-1"
 
+        # Add tenant parameter if TARGET_TENANT_ID is specified
+        tenant_param = {}
+        if TARGET_TENANT_ID:
+            tenant_param = {"tenant": TARGET_TENANT_ID}
+
         # Create the device
         try:
             device = netbox.dcim.create_device(
@@ -470,7 +496,8 @@ def create_parent_child_devices(netbox, data, objtype_id):
                 device_role=device_role,
                 site_name=site_name,
                 comment=comment[:200] if comment else "",
-                tags=device_tags
+                tags=device_tags,
+                **tenant_param  # Add tenant parameter
             )
 
             if asset_no:
