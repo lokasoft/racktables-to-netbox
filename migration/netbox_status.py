@@ -91,10 +91,10 @@ def determine_prefix_status(prefix_name, comment, valid_statuses=None):
     if valid_statuses is None:
         valid_statuses = ['active', 'container', 'reserved', 'deprecated']
     
-    # Default to 'container' or first valid status if name/comment are empty
+    # Default to 'reserved' if name/comment are empty - CHANGED FROM 'active'/'container'
     if (not prefix_name or prefix_name.strip() == "") and (not comment or comment.strip() == ""):
-        # For empty prefixes, use container (if available) or first valid status
-        return 'container' if 'container' in valid_statuses else valid_statuses[0]
+        # For empty prefixes, use reserved (if available) or first valid status
+        return 'reserved' if 'reserved' in valid_statuses else valid_statuses[0]
     
     # Determine status based on content patterns
     lower_name = prefix_name.lower() if prefix_name else ""
