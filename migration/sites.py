@@ -7,7 +7,9 @@ from racktables_netbox_migration.utils import get_db_connection, get_cursor
 from racktables_netbox_migration.db import (
     getRowsAtSite, getRacksAtRow, getAtomsAtRack, getRackHeight, getTags
 )
-from racktables_netbox_migration.config import SITE_NAME_LENGTH_THRESHOLD, TARGET_SITE
+from racktables_netbox_migration.config import (
+    SITE_NAME_LENGTH_THRESHOLD, TARGET_SITE, TARGET_TENANT, TARGET_TENANT_ID
+)
 
 def create_sites_and_racks(netbox):
     """
@@ -53,9 +55,14 @@ def create_sites_and_racks(netbox):
                 print(f"Skipping probable location (address): {site_name}")
                 continue
             
+            # Add tenant parameter if TARGET_TENANT_ID is specified
+            tenant_param = {}
+            if TARGET_TENANT_ID:
+                tenant_param = {"tenant": TARGET_TENANT_ID}
+            
             print(f"Creating site: {site_name}")
             try:
-                netbox.dcim.create_site(site_name, slugify(site_name))
+                netbox.dcim.create_site(site_name, slugify(site_name), **tenant_param)
             except Exception as e:
                 print(f"Failed to create site {site_name}: {e}")
                 continue
@@ -86,6 +93,11 @@ def create_rows_and_racks(netbox, site_id, site_name):
             else:
                 rack_name = site_name + "." + rack_name
             
+            # Add tenant parameter if TARGET_TENANT_ID is specified
+            tenant_param = {}
+            if TARGET_TENANT_ID:
+                tenant_param = {"tenant": TARGET_TENANT_ID}
+            
             print(f"Creating rack: {rack_name}")
             try:
                 # Create the rack
@@ -94,7 +106,8 @@ def create_rows_and_racks(netbox, site_id, site_name):
                     comment=rack_comment[:200] if rack_comment else "",
                     site_name=site_name,
                     u_height=rack_height,
-                    tags=rack_tags
+                    tags=rack_tags,
+                    **tenant_param  # Add tenant parameter
                 )
                 
                 # Add rack to global tracking
