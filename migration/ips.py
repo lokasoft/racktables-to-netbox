@@ -9,7 +9,7 @@ from racktables_netbox_migration.utils import (
     format_prefix_description, is_available_prefix
 )
 from racktables_netbox_migration.db import getTags, change_interface_name
-from racktables_netbox_migration.config import IPV4_TAG, IPV6_TAG
+from racktables_netbox_migration.config import IPV4_TAG, IPV6_TAG, TARGET_TENANT_ID
 
 def create_ip_networks(netbox, IP, target_site=None):
     """
@@ -63,6 +63,11 @@ def create_ip_networks(netbox, IP, target_site=None):
         # Format description to include tags and prefix name
         description = format_prefix_description(prefix_name, tags, comment)
         
+        # Add tenant parameter if TARGET_TENANT_ID is specified
+        tenant_param = {}
+        if TARGET_TENANT_ID:
+            tenant_param = {"tenant": TARGET_TENANT_ID}
+        
         # Create the prefix in NetBox
         try:
             netbox.ipam.create_ip_prefix(
@@ -71,7 +76,8 @@ def create_ip_networks(netbox, IP, target_site=None):
                 status=status,
                 description=description,
                 custom_fields={'Prefix_Name': prefix_name},
-                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}] + tags
+                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}] + tags,
+                **tenant_param  # Add tenant parameter
             )
             print(f"Created {prefix} - {prefix_name}")
         except Exception as e:
@@ -109,26 +115,63 @@ def create_ip_allocated(netbox, IP, target_site=None):
             ip_allocations = cursor.fetchall()
     
     # Filter by site if site filtering is enabled
+    site_devices = set()
+    site_vms = set()
+    
     if target_site:
-        # Get devices and VMs at the target site
-        site_devices = set(device['name'] for device in netbox.dcim.get_devices(site=target_site))
-        site_vms = set()
+        # First, try to get the site by exact name
+        site_obj = None
+        try:
+            # Get site to determine its ID
+            sites = list(netbox.dcim.get_sites(name=target_site))
+            if sites:
+                site_obj = sites[0]
+                site_id = site_obj['id']
+                print(f"Found site '{target_site}' with ID: {site_id}")
+            else:
+                # Try a case-insensitive search as fallback
+                all_sites = list(netbox.dcim.get_sites())
+                for site in all_sites:
+                    if site['name'].lower() == target_site.lower():
+                        site_obj = site
+                        site_id = site['id']
+                        print(f"Found site '{site['name']}' with ID: {site_id} (case-insensitive match)")
+                        break
+                
+                if not site_obj:
+                    print(f"Warning: Could not find site '{target_site}'. IP filtering by site will be skipped.")
+        except Exception as e:
+            print(f"Error getting site '{target_site}': {e}")
+            print("IP filtering by site will be skipped.")
         
-        # Get VMs in clusters at the target site
-        site_clusters = netbox.virtualization.get_clusters(site=target_site)
-        for cluster in site_clusters:
-            cluster_vms = netbox.virtualization.get_virtual_machines(cluster_id=cluster['id'])
-            site_vms.update(vm['name'] for vm in cluster_vms)
-        
-        # Filter allocations
-        filtered_allocations = []
-        for allocation in ip_allocations:
-            device_name = allocation["name"].strip() if allocation["name"] else ""
-            if device_name in site_devices or device_name in site_vms:
-                filtered_allocations.append(allocation)
-        
-        ip_allocations = filtered_allocations
-        print(f"Filtered to {len(ip_allocations)} IP allocations for site '{target_site}'")
+        # If we found the site, filter devices and VMs by that site
+        if site_obj:
+            try:
+                # Use the site ID for filtering
+                site_id = site_obj['id']
+                site_devices = set(device['name'] for device in netbox.dcim.get_devices(site_id=site_id))
+                print(f"Found {len(site_devices)} devices in site '{site_obj['name']}'")
+                
+                # Get VMs in clusters at the target site
+                site_clusters = netbox.virtualization.get_clusters(site_id=site_id)
+                for cluster in site_clusters:
+                    cluster_vms = netbox.virtualization.get_virtual_machines(cluster_id=cluster['id'])
+                    site_vms.update(vm['name'] for vm in cluster_vms)
+                
+                print(f"Found {len(site_vms)} VMs in site '{site_obj['name']}'")
+                
+                # Filter allocations
+                filtered_allocations = []
+                for allocation in ip_allocations:
+                    device_name = allocation["OBJ.name"].strip() if allocation["OBJ.name"] else ""
+                    if device_name in site_devices or device_name in site_vms:
+                        filtered_allocations.append(allocation)
+                
+                ip_allocations = filtered_allocations
+                print(f"Filtered to {len(ip_allocations)} IP allocations for site '{site_obj['name']}'")
+            except Exception as e:
+                print(f"Error filtering by site: {e}")
+                print("Proceeding with all IP allocations.")
     
     # Process each IP allocation
     for allocation in ip_allocations:
@@ -169,6 +212,11 @@ def create_ip_allocated(netbox, IP, target_site=None):
         else:
             interface_name = f"no_RT_name{random.randint(0, 99999)}"
         
+        # Add tenant parameter if TARGET_TENANT_ID is specified
+        tenant_param = {}
+        if TARGET_TENANT_ID:
+            tenant_param = {"tenant": TARGET_TENANT_ID}
+        
         # Determine if device is VM or physical device
         if objtype_id == 1504:  # VM
             device_or_vm = "vm"
@@ -182,26 +230,60 @@ def create_ip_allocated(netbox, IP, target_site=None):
         for name, interface_id in [(interface['name'], interface['id']) for interface in interface_list]:
             if interface_name == name:
                 # Add IP to existing interface
-                netbox.ipam.create_ip_address(
-                    address=string_ip,
-                    role=use_vrrp_role,
-                    assigned_object={'device' if device_or_vm == "device" else "virtual_machine": device_name},
-                    interface_type="virtual",
-                    assigned_object_type="dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
-                    assigned_object_id=interface_id,
-                    description=comment[:200] if comment else "",
-                    custom_fields={'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
-                    tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
-                )
-                device_contained_same_interface = True
-                break
+                try:
+                    netbox.ipam.create_ip_address(
+                        address=string_ip,
+                        role=use_vrrp_role,
+                        assigned_object={'device' if device_or_vm == "device" else "virtual_machine": device_name},
+                        interface_type="virtual",
+                        assigned_object_type="dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
+                        assigned_object_id=interface_id,
+                        description=comment[:200] if comment else "",
+                        custom_fields={'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
+                        tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
+                        **tenant_param  # Add tenant parameter
+                    )
+                    device_contained_same_interface = True
+                    print(f"Created IP {string_ip} on {device_name}/{interface_name}")
+                    break
+                except Exception as e:
+                    print(f"Error creating IP {string_ip} on {device_name}/{interface_name}: {e}")
         
         # If no matching interface found, create a new virtual interface
         if not device_contained_same_interface:
-            if device_or_vm == "device":
-                device_id = netbox.dcim.get_devices(name=device_name)[0]['id']
-            else:
-                device_id = netbox.virtualization.get_virtual_machines(name=device_name)[0]['id']
+            # Find the device ID by name
+            device_id = None
+            try:
+                if device_or_vm == "device":
+                    device_results = list(netbox.dcim.get_devices(name=device_name))
+                    if device_results:
+                        device_id = device_results[0]['id']
+                    else:
+                        # Try with case-insensitive search
+                        all_devices = list(netbox.dcim.get_devices())
+                        for dev in all_devices:
+                            if dev['name'].lower() == device_name.lower():
+                                device_id = dev['id']
+                                device_name = dev['name']  # Use the actual name from NetBox
+                                break
+                else:
+                    vm_results = list(netbox.virtualization.get_virtual_machines(name=device_name))
+                    if vm_results:
+                        device_id = vm_results[0]['id']
+                    else:
+                        # Try with case-insensitive search
+                        all_vms = list(netbox.virtualization.get_virtual_machines())
+                        for vm in all_vms:
+                            if vm['name'].lower() == device_name.lower():
+                                device_id = vm['id']
+                                device_name = vm['name']  # Use the actual name from NetBox
+                                break
+            except Exception as e:
+                print(f"Error finding device/VM {device_name}: {e}")
+            
+            if not device_id:
+                print(f"Could not find device/VM {device_name} - skipping IP {string_ip}")
+                continue
             
             try:
                 # Create a new virtual interface
@@ -216,7 +298,7 @@ def create_ip_allocated(netbox, IP, target_site=None):
                     added_interface = netbox.virtualization.create_interface(
                         name=interface_name,
                         interface_type="virtual",
-                        virtual_machine=device_name,
+                        virtual_machine=device_id,  # Pass ID directly
                         custom_fields={"VM_Interface_Type": "Virtual"}
                     )
                 
@@ -225,13 +307,15 @@ def create_ip_allocated(netbox, IP, target_site=None):
                     address=string_ip,
                     role=use_vrrp_role,
                     assigned_object_id=added_interface['id'],
-                    assigned_object={"device" if device_or_vm == "device" else "virtual_machine": {'id': device_id}},
+                    assigned_object={"device" if device_or_vm == "device" else "virtual_machine": device_id},  # Use ID
                     interface_type="virtual",
                     assigned_object_type="dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
                     description=comment[:200] if comment else "",
                     custom_fields={'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
-                    tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
+                    tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
+                    **tenant_param  # Add tenant parameter
                 )
+                print(f"Created new interface {interface_name} with IP {string_ip} on {device_name}")
             except Exception as e:
                 print(f"Error creating interface or IP: {e}")
 
@@ -255,6 +339,11 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
             cursor.execute(f"SELECT ip,name,comment FROM IPv{IP}Address")
             ip_addresses = cursor.fetchall()
     
+    # Add tenant parameter if TARGET_TENANT_ID is specified
+    tenant_param = {}
+    if TARGET_TENANT_ID:
+        tenant_param = {"tenant": TARGET_TENANT_ID}
+    
     for ip_data in ip_addresses:
         ip = ip_data["ip"]
         ip_name = ip_data["name"]
@@ -273,7 +362,8 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
                 address=string_ip,
                 description=comment[:200] if comment else "",
                 custom_fields={'IP_Name': ip_name},
-                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
+                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
+                **tenant_param  # Add tenant parameter
             )
             print(f"Created non-allocated IP {string_ip}")
         except Exception as e:
