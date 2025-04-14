@@ -41,37 +41,60 @@ def get_valid_status_choices(netbox, object_type):
         return ['active']  # Default fallback
     
     protocol = "https" if NB_USE_SSL else "http"
-    url = f"{protocol}://{NB_HOST}:{NB_PORT}/api/{endpoints[object_type]}/choices/"
+    headers = {"Authorization": f"Token {NB_TOKEN}"}
     
+    # DIRECT APPROACH: Get real objects and read their status structure
     try:
-        headers = {"Authorization": f"Token {NB_TOKEN}"}
-        response = requests.get(url, headers=headers, verify=NB_USE_SSL)
+        # First try to get a site as reference - sites almost always exist
+        site_endpoint = f"{protocol}://{NB_HOST}:{NB_PORT}/api/dcim/sites/"
+        response = requests.get(site_endpoint, headers=headers, verify=NB_USE_SSL, params={"limit": 1})
         
         if response.status_code == 200:
-            choices_data = response.json()
-            # Extract status choices from the response
-            status_choices = []
-            
-            # Different NetBox versions have different response formats
-            if 'status' in choices_data:
-                # Newer NetBox versions
-                status_choices = [choice[0] for choice in choices_data['status']]
-            elif 'choices' in choices_data and 'status' in choices_data['choices']:
-                # Older NetBox versions
-                status_choices = [choice[0] for choice in choices_data['choices']['status']]
-            
-            if status_choices:
-                # Cache the results
-                _valid_status_choices[object_type] = status_choices
-                print(f"Valid {object_type} status choices: {', '.join(status_choices)}")
-                return status_choices
-        
-        logging.error(f"Failed to get status choices for {object_type}: {response.status_code}")
+            data = response.json()
+            if "results" in data and len(data["results"]) > 0:
+                site = data["results"][0]
+                if "status" in site and isinstance(site["status"], dict):
+                    # Modern NetBox format with value and label
+                    print(f"Found NetBox using dictionary status format")
+                    
+                    # Check if we can get actual objects of requested type
+                    obj_endpoint = f"{protocol}://{NB_HOST}:{NB_PORT}/api/{endpoints[object_type]}/"
+                    obj_response = requests.get(obj_endpoint, headers=headers, verify=NB_USE_SSL, params={"limit": 10})
+                    
+                    if obj_response.status_code == 200:
+                        obj_data = obj_response.json()
+                        if "results" in obj_data and len(obj_data["results"]) > 0:
+                            # Extract all unique status values from objects
+                            statuses = []
+                            for obj in obj_data["results"]:
+                                if "status" in obj and isinstance(obj["status"], dict):
+                                    status_value = obj["status"].get("value")
+                                    if status_value and status_value not in statuses:
+                                        statuses.append(status_value)
+                            
+                            if statuses:
+                                print(f"Found actual status values for {object_type}: {', '.join(statuses)}")
+                                _valid_status_choices[object_type] = statuses
+                                # Make sure we have common statuses
+                                for common_status in ['active', 'reserved', 'deprecated', 'container']:
+                                    if common_status not in statuses:
+                                        statuses.append(common_status)
+                                return statuses
+                    
+                    # Fall back to using site status value as reference
+                    site_status = site["status"]["value"]
+                    print(f"Using site status '{site_status}' as reference")
+                    statuses = ['active', 'reserved', 'deprecated', 'container']
+                    if site_status not in statuses:
+                        statuses.append(site_status)
+                    _valid_status_choices[object_type] = statuses
+                    return statuses
     except Exception as e:
-        logging.error(f"Error getting status choices for {object_type}: {str(e)}")
+        logging.error(f"Error in direct status detection: {str(e)}")
     
-    # Default fallback for common statuses
-    fallback = ['active', 'container', 'reserved']
+    # Final fallback with standard values
+    fallback = ['active', 'container', 'reserved', 'deprecated']
+    print(f"Using fallback status choices: {', '.join(fallback)}")
     _valid_status_choices[object_type] = fallback
     return fallback
 
@@ -91,10 +114,13 @@ def determine_prefix_status(prefix_name, comment, valid_statuses=None):
     if valid_statuses is None:
         valid_statuses = ['active', 'container', 'reserved', 'deprecated']
     
-    # Default to 'reserved' if name/comment are empty - CHANGED FROM 'active'/'container'
+    # Default to 'active' if available, otherwise first valid status
+    default_status = 'active' if 'active' in valid_statuses else valid_statuses[0]
+    
+    # Default to 'reserved' if name/comment are empty
     if (not prefix_name or prefix_name.strip() == "") and (not comment or comment.strip() == ""):
         # For empty prefixes, use reserved (if available) or first valid status
-        return 'reserved' if 'reserved' in valid_statuses else valid_statuses[0]
+        return 'reserved' if 'reserved' in valid_statuses else default_status
     
     # Determine status based on content patterns
     lower_name = prefix_name.lower() if prefix_name else ""
@@ -103,28 +129,28 @@ def determine_prefix_status(prefix_name, comment, valid_statuses=None):
     # Check for hints that the prefix is specifically reserved
     if any(term in lower_name or term in lower_comment for term in 
            ['reserved', 'hold', 'future', 'planned']):
-        return 'reserved' if 'reserved' in valid_statuses else 'active'
+        return 'reserved' if 'reserved' in valid_statuses else default_status
     
     # Check for hints that the prefix is deprecated
     if any(term in lower_name or term in lower_comment for term in 
            ['deprecated', 'obsolete', 'old', 'inactive', 'decommissioned']):
-        return 'deprecated' if 'deprecated' in valid_statuses else 'active'
+        return 'deprecated' if 'deprecated' in valid_statuses else default_status
     
     # Check for specific hints that the prefix should be a container
     if any(term in lower_name or term in lower_comment for term in 
            ['container', 'parent', 'supernet', 'aggregate']):
-        return 'container' if 'container' in valid_statuses else 'active'
+        return 'container' if 'container' in valid_statuses else default_status
     
     # Check for hints that this is available/unused space
     if any(term in lower_name or term in lower_comment for term in 
            ['available', 'unused', 'free', '[here be dragons', '[create network here]', 'unallocated']):
-        return 'container' if 'container' in valid_statuses else 'active'
+        return 'container' if 'container' in valid_statuses else default_status
     
     # Check for hints that this is actively used
     if any(term in lower_name or term in lower_comment for term in 
            ['in use', 'used', 'active', 'production', 'allocated']):
-        return 'active' if 'active' in valid_statuses else valid_statuses[0]
+        return 'active' if 'active' in valid_statuses else default_status
     
     # When we can't clearly determine from the content, default to 'active' for anything with a name/comment
     # This assumes that if someone took the time to name it, it's likely in use
-    return 'active' if 'active' in valid_statuses else valid_statuses[0]
+    return default_status
