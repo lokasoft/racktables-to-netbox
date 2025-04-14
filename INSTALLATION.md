@@ -186,6 +186,16 @@ Basic usage with a specific site:
 python migrate.py --site "YourSiteName"
 ```
 
+Basic usage with a specific tenant:
+```bash
+python migrate.py --tenant "YourTenantName"
+```
+
+Combining site and tenant filters:
+```bash
+python migrate.py --site "YourSiteName" --tenant "YourTenantName"
+```
+
 Other migration options:
 ```bash
 # Run only basic migration (no extended components)
@@ -250,6 +260,7 @@ migrate-racktables --site "YourSiteName"
    - Increase your Python process memory limit if possible
    - Run the script on a machine with more resources
    - Consider filtering by site with the `--site` parameter
+   - Consider filtering by tenant with the `--tenant` parameter
 
 ## Post-Migration Verification
 
@@ -261,6 +272,7 @@ After migration completes, verify:
 4. IP addresses are correctly assigned
 5. Parent-child relationships are maintained
 6. Custom fields are populated with the right data
+7. Tenant associations are correct (if using tenant filtering)
 
 ## Setup Script Details
 
