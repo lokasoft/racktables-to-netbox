@@ -5,7 +5,7 @@ from slugify import slugify
 
 from racktables_netbox_migration.utils import get_db_connection, get_cursor
 from racktables_netbox_migration.db import getTags
-from racktables_netbox_migration.config import TARGET_SITE, TARGET_SITE_ID
+from racktables_netbox_migration.config import TARGET_SITE, TARGET_SITE_ID, TARGET_TENANT, TARGET_TENANT_ID
 
 def create_vms(netbox, create_mounted=True, create_unmounted=True):
     """
@@ -25,7 +25,13 @@ def create_vms(netbox, create_mounted=True, create_unmounted=True):
     # Get existing VM data to avoid duplicates
     existing_cluster_types = set(cluster_type['name'] for cluster_type in netbox.virtualization.get_cluster_types())
     existing_cluster_names = set(cluster['name'] for cluster in netbox.virtualization.get_clusters())
-    existing_virtual_machines = set(virtual_machine['name'] for virtual_machine in netbox.virtualization.get_virtual_machines())
+    
+    # If tenant filtering is enabled, filter VMs by tenant
+    vm_filters = {}
+    if TARGET_TENANT_ID:
+        vm_filters["tenant_id"] = TARGET_TENANT_ID
+    
+    existing_virtual_machines = set(virtual_machine['name'] for virtual_machine in netbox.virtualization.get_virtual_machines(**vm_filters))
     
     # Site filtering for clusters
     site_filter = {}
@@ -88,13 +94,19 @@ def create_mounted_vms(netbox, existing_cluster_types, existing_cluster_names, e
                     except Exception as e:
                         print(f"Error creating cluster type {cluster_name}: {e}")
                 
+                # Add tenant parameter if TARGET_TENANT_ID is specified
+                tenant_param = {}
+                if TARGET_TENANT_ID:
+                    tenant_param = {"tenant": TARGET_TENANT_ID}
+                
                 # Create cluster if needed
                 if cluster_name not in existing_cluster_names:
                     try:
                         netbox.virtualization.create_cluster(
                             cluster_name, 
                             cluster_name,
-                            **site_filter
+                            **site_filter,
+                            **tenant_param
                         )
                         existing_cluster_names.add(cluster_name)
                         print(f"Created cluster: {cluster_name}")
@@ -141,6 +153,11 @@ def create_mounted_vms(netbox, existing_cluster_types, existing_cluster_names, e
                     # Get VM tags
                     vm_tags = getTags("object", child_entity_id)
                     
+                    # Add tenant parameter if TARGET_TENANT_ID is specified
+                    tenant_param = {}
+                    if TARGET_TENANT_ID:
+                        tenant_param = {"tenant": TARGET_TENANT_ID}
+                    
                     # Create the VM
                     try:
                         netbox.virtualization.create_virtual_machine(
@@ -151,7 +168,8 @@ def create_mounted_vms(netbox, existing_cluster_types, existing_cluster_names, e
                             custom_fields={
                                 "VM_Label": vm_label[:200] if vm_label else "", 
                                 "VM_Asset_No": vm_asset_no if vm_asset_no else ""
-                            }
+                            },
+                            **tenant_param  # Add tenant parameter
                         )
                         
                         existing_virtual_machines.add(vm_name)
@@ -190,13 +208,19 @@ def create_unmounted_vms(netbox, existing_cluster_types, existing_cluster_names,
         except Exception as e:
             print(f"Error creating cluster type {unmounted_cluster_name}: {e}")
     
+    # Add tenant parameter if TARGET_TENANT_ID is specified
+    tenant_param = {}
+    if TARGET_TENANT_ID:
+        tenant_param = {"tenant": TARGET_TENANT_ID}
+    
     # Create cluster if needed
     if unmounted_cluster_name not in existing_cluster_names:
         try:
             netbox.virtualization.create_cluster(
                 unmounted_cluster_name, 
                 unmounted_cluster_name,
-                **site_filter
+                **site_filter,
+                **tenant_param
             )
             existing_cluster_names.add(unmounted_cluster_name)
             print(f"Created cluster: {unmounted_cluster_name}")
@@ -243,6 +267,11 @@ def create_unmounted_vms(netbox, existing_cluster_types, existing_cluster_names,
         # Get VM tags
         vm_tags = getTags("object", vm_id)
         
+        # Add tenant parameter if TARGET_TENANT_ID is specified
+        tenant_param = {}
+        if TARGET_TENANT_ID:
+            tenant_param = {"tenant": TARGET_TENANT_ID}
+        
         # Create the VM
         try:
             netbox.virtualization.create_virtual_machine(
@@ -253,7 +282,8 @@ def create_unmounted_vms(netbox, existing_cluster_types, existing_cluster_names,
                 custom_fields={
                     "VM_Label": vm_label[:200] if vm_label else "", 
                     "VM_Asset_No": vm_asset_no if vm_asset_no else ""
-                }
+                },
+                **tenant_param  # Add tenant parameter
             )
             
             existing_virtual_machines.add(vm_name)
