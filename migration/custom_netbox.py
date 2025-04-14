@@ -25,6 +25,7 @@ class NetBoxWrapper:
         self.ipam = IpamWrapper(self.nb)
         self.virtualization = VirtualizationWrapper(self.nb)
         self.extras = ExtrasWrapper(self.nb)
+        self.tenancy = TenancyWrapper(self.nb)  # Add tenancy wrapper
 
 
 class DcimWrapper:
@@ -369,6 +370,29 @@ class VirtualizationWrapper:
             protocol=protocol,
             **kwargs
         )
+
+
+class TenancyWrapper:
+    """Wrapper for Tenancy endpoints"""
+
+    def __init__(self, nb):
+        self.nb = nb
+
+    def get_tenants(self, **kwargs):
+        """Get tenants with optional filters"""
+        return self.nb.tenancy.tenants.filter(**kwargs)
+
+    def create_tenant(self, name, slug, **kwargs):
+        """Create a new tenant"""
+        return self.nb.tenancy.tenants.create(name=name, slug=slug, **kwargs)
+
+    def get_tenant_groups(self, **kwargs):
+        """Get tenant groups with optional filters"""
+        return self.nb.tenancy.tenant_groups.filter(**kwargs)
+
+    def create_tenant_group(self, name, slug, **kwargs):
+        """Create a new tenant group"""
+        return self.nb.tenancy.tenant_groups.create(name=name, slug=slug, **kwargs)
 
 
 class ExtrasWrapper:
