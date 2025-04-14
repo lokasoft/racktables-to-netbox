@@ -34,6 +34,10 @@ CREATE_IP_RANGES =             True
 TARGET_SITE = None  # This can be set via command line args
 TARGET_SITE_ID = None  # Store the numeric ID of the target site
 
+# Tenant filtering - set to None to process all tenants, or specify a tenant name to restrict migration
+TARGET_TENANT = None  # This can be set via command line args
+TARGET_TENANT_ID = None  # Store the UUID of the target tenant
+
 # Whether to store cached data with pickle
 STORE_DATA = False
 
