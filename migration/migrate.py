@@ -54,6 +54,258 @@ def parse_arguments():
     parser.add_argument('--skip-custom-fields', action='store_true', help='Skip setting up custom fields')
     return parser.parse_args()
 
+def create_helper_modules():
+    """Create required helper modules if they don't exist"""
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration"), exist_ok=True)
+    
+    # Create netbox_status.py module
+    netbox_status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration", "netbox_status.py")
+    if not os.path.exists(netbox_status_path):
+        with open(netbox_status_path, 'w') as f:
+            f.write("""\"\"\"
+Helper module to determine valid NetBox statuses across versions
+Can be imported by other modules to ensure consistent status handling
+\"\"\"
+import requests
+import logging
+from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL
+
+# Cache for valid status choices
+_valid_status_choices = {
+    'prefix': None,
+    'ip_address': None
+}
+
+def get_valid_status_choices(netbox, object_type):
+    \"\"\"
+    Get valid status choices for a specific object type in NetBox
+    
+    Args:
+        netbox: NetBox client instance
+        object_type: Type of object to get status choices for (e.g., 'prefix')
+        
+    Returns:
+        list: List of valid status choices
+    \"\"\"
+    global _valid_status_choices
+    
+    # Return cached choices if available
+    if _valid_status_choices[object_type]:
+        return _valid_status_choices[object_type]
+    
+    # API endpoints for different object types
+    endpoints = {
+        'prefix': 'ipam/prefixes',
+        'ip_address': 'ipam/ip-addresses'
+    }
+    
+    # Determine URL based on object type
+    if object_type not in endpoints:
+        logging.error(f"Invalid object type: {object_type}")
+        return ['active']  # Default fallback
+    
+    protocol = "https" if NB_USE_SSL else "http"
+    url = f"{protocol}://{NB_HOST}:{NB_PORT}/api/{endpoints[object_type]}/choices/"
+    
+    try:
+        headers = {"Authorization": f"Token {NB_TOKEN}"}
+        response = requests.get(url, headers=headers, verify=NB_USE_SSL)
+        
+        if response.status_code == 200:
+            choices_data = response.json()
+            # Extract status choices from the response
+            status_choices = []
+            
+            # Different NetBox versions have different response formats
+            if 'status' in choices_data:
+                # Newer NetBox versions
+                status_choices = [choice[0] for choice in choices_data['status']]
+            elif 'choices' in choices_data and 'status' in choices_data['choices']:
+                # Older NetBox versions
+                status_choices = [choice[0] for choice in choices_data['choices']['status']]
+            
+            if status_choices:
+                # Cache the results
+                _valid_status_choices[object_type] = status_choices
+                print(f"Valid {object_type} status choices: {', '.join(status_choices)}")
+                return status_choices
+        
+        logging.error(f"Failed to get status choices for {object_type}: {response.status_code}")
+    except Exception as e:
+        logging.error(f"Error getting status choices for {object_type}: {str(e)}")
+    
+    # Default fallback for common statuses
+    fallback = ['active', 'container', 'reserved']
+    _valid_status_choices[object_type] = fallback
+    return fallback
+
+def determine_prefix_status(prefix_name, comment, valid_statuses=None):
+    \"\"\"
+    Determine the appropriate NetBox status for a prefix based on its name and comments
+    
+    Args:
+        prefix_name: Name of the prefix from Racktables
+        comment: Comment for the prefix from Racktables
+        valid_statuses: List of valid status choices in NetBox
+        
+    Returns:
+        str: Most appropriate status for the prefix
+    \"\"\"
+    # Use default statuses if none provided
+    if valid_statuses is None:
+        valid_statuses = ['active', 'container', 'reserved', 'deprecated']
+    
+    # Default to 'container' or first valid status if name/comment are empty
+    if (not prefix_name or prefix_name.strip() == "") and (not comment or comment.strip() == ""):
+        # For empty prefixes, use container (if available) or first valid status
+        return 'container' if 'container' in valid_statuses else valid_statuses[0]
+    
+    # Determine status based on content patterns
+    lower_name = prefix_name.lower() if prefix_name else ""
+    lower_comment = comment.lower() if comment else ""
+    
+    # Check for hints that the prefix is specifically reserved
+    if any(term in lower_name or term in lower_comment for term in 
+           ['reserved', 'hold', 'future', 'planned']):
+        return 'reserved' if 'reserved' in valid_statuses else 'active'
+    
+    # Check for hints that the prefix is deprecated
+    if any(term in lower_name or term in lower_comment for term in 
+           ['deprecated', 'obsolete', 'old', 'inactive', 'decommissioned']):
+        return 'deprecated' if 'deprecated' in valid_statuses else 'active'
+    
+    # Check for specific hints that the prefix should be a container
+    if any(term in lower_name or term in lower_comment for term in 
+           ['container', 'parent', 'supernet', 'aggregate']):
+        return 'container' if 'container' in valid_statuses else 'active'
+    
+    # Check for hints that this is available/unused space
+    if any(term in lower_name or term in lower_comment for term in 
+           ['available', 'unused', 'free', '[here be dragons', '[create network here]', 'unallocated']):
+        return 'container' if 'container' in valid_statuses else 'active'
+    
+    # Check for hints that this is actively used
+    if any(term in lower_name or term in lower_comment for term in 
+           ['in use', 'used', 'active', 'production', 'allocated']):
+        return 'active' if 'active' in valid_statuses else valid_statuses[0]
+    
+    # When we can't clearly determine from the content, default to 'active' for anything with a name/comment
+    # This assumes that if someone took the time to name it, it's likely in use
+    return 'active' if 'active' in valid_statuses else valid_statuses[0]
+""")
+    
+    # Create site_tenant.py module
+    site_tenant_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration", "site_tenant.py")
+    if not os.path.exists(site_tenant_path):
+        with open(site_tenant_path, 'w') as f:
+            f.write("""\"\"\"
+Add site and tenant associations to all NetBox objects
+\"\"\"
+import os
+import sys
+import logging
+from slugify import slugify
+
+def ensure_site_tenant_associations(netbox, site_name, tenant_name):
+    \"\"\"
+    Ensures that site and tenant IDs are properly retrieved and set globally
+    
+    Args:
+        netbox: NetBox client instance
+        site_name: Site name to use
+        tenant_name: Tenant name to use
+        
+    Returns:
+        tuple: (site_id, tenant_id) or (None, None) if not available
+    \"\"\"
+    # Set up logging to capture detailed information
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("association_debug.log"),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    site_id = None
+    tenant_id = None
+    
+    # Handle site association
+    if site_name:
+        logging.info(f"Looking up site: {site_name}")
+        try:
+            sites = list(netbox.dcim.get_sites(name=site_name))
+            if sites:
+                site = sites[0]
+                # Extract ID based on available format (could be property or dict key)
+                site_id = site.id if hasattr(site, 'id') else site.get('id')
+                logging.info(f"Found site '{site_name}' with ID: {site_id}")
+            else:
+                # Try to create the site if it doesn't exist
+                logging.info(f"Site '{site_name}' not found, creating it...")
+                try:
+                    new_site = netbox.dcim.create_site(site_name, slugify(site_name))
+                    site_id = new_site.id if hasattr(new_site, 'id') else new_site.get('id')
+                    logging.info(f"Created site '{site_name}' with ID: {site_id}")
+                except Exception as e:
+                    logging.error(f"Failed to create site '{site_name}': {str(e)}")
+        except Exception as e:
+            logging.error(f"Error looking up site '{site_name}': {str(e)}")
+    
+    # Handle tenant association
+    if tenant_name:
+        logging.info(f"Looking up tenant: {tenant_name}")
+        try:
+            tenants = list(netbox.tenancy.get_tenants(name=tenant_name))
+            if tenants:
+                tenant = tenants[0]
+                # Extract ID based on available format (could be property or dict key)
+                tenant_id = tenant.id if hasattr(tenant, 'id') else tenant.get('id')
+                logging.info(f"Found tenant '{tenant_name}' with ID: {tenant_id}")
+            else:
+                # Try to create the tenant if it doesn't exist
+                logging.info(f"Tenant '{tenant_name}' not found, creating it...")
+                try:
+                    new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
+                    tenant_id = new_tenant.id if hasattr(new_tenant, 'id') else new_tenant.get('id')
+                    logging.info(f"Created tenant '{tenant_name}' with ID: {tenant_id}")
+                except Exception as e:
+                    logging.error(f"Failed to create tenant '{tenant_name}': {str(e)}")
+        except Exception as e:
+            logging.error(f"Error looking up tenant '{tenant_name}': {str(e)}")
+    
+    # Save to environment variables for consistent access
+    if site_id:
+        os.environ['NETBOX_SITE_ID'] = str(site_id)
+    if tenant_id:
+        os.environ['NETBOX_TENANT_ID'] = str(tenant_id)
+    
+    return site_id, tenant_id
+
+def get_site_tenant_params():
+    \"\"\"
+    Get site and tenant parameters for API calls
+    
+    Returns:
+        dict: Parameters for site and tenant to be passed to API calls
+    \"\"\"
+    params = {}
+    
+    # Get site ID from environment or global variable
+    site_id = os.environ.get('NETBOX_SITE_ID')
+    if site_id:
+        params['site'] = site_id
+    
+    # Get tenant ID from environment or global variable
+    tenant_id = os.environ.get('NETBOX_TENANT_ID')
+    if tenant_id:
+        params['tenant'] = tenant_id
+    
+    return params
+""")
+
 def verify_site_exists(netbox, site_name):
     """Verify that the specified site exists in NetBox and create a matching tag"""
     global TARGET_SITE_ID  # Global declaration must come first
@@ -294,6 +546,9 @@ def main():
         global TARGET_TENANT
         TARGET_TENANT = args.tenant
         logging.info(f"Filtering migration for tenant: {TARGET_TENANT}")
+        
+    # Create required helper modules
+    create_helper_modules()
     
     # Load custom config if specified
     if args.config:
@@ -335,15 +590,9 @@ def main():
         logging.error(f"Failed to initialize NetBox connection: {e}")
         return False
     
-    # Verify site exists
-    if not verify_site_exists(netbox, TARGET_SITE):
-        logging.error("Migration aborted: Target site not found")
-        return False
-    
-    # Verify tenant exists
-    if not verify_tenant_exists(netbox, TARGET_TENANT):
-        logging.error("Migration aborted: Target tenant not found")
-        return False
+    # Ensure site and tenant associations are set up
+    from migration.site_tenant import ensure_site_tenant_associations
+    ensure_site_tenant_associations(netbox, TARGET_SITE, TARGET_TENANT)
     
     # Run migrations based on arguments
     success = True
