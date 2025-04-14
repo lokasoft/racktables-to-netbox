@@ -87,63 +87,6 @@ def get_cursor(connection):
         if cursor:
             cursor.close()
 
-def verify_site_exists(netbox, site_name):
-    """
-    Verify that the specified site exists in NetBox
-    
-    Args:
-        netbox: NetBox client instance
-        site_name: Name of site to verify
-        
-    Returns:
-        bool: True if site exists or if site_name is None, False otherwise
-    """
-    if not site_name:
-        return True  # No site filter, proceed with all
-    
-    sites = list(netbox.dcim.get_sites(name=site_name))
-    if sites:
-        print(f"Target site '{site_name}' found - restricting migration to this site")
-        return True
-    else:
-        print(f"ERROR: Target site '{site_name}' not found in NetBox")
-        return False
-
-def verify_tenant_exists(netbox, tenant_name):
-    """
-    Verify that the specified tenant exists in NetBox
-    
-    Args:
-        netbox: NetBox client instance
-        tenant_name: Name of tenant to verify
-        
-    Returns:
-        bool: True if tenant exists or if tenant_name is None, False otherwise
-    """
-    global TARGET_TENANT_ID  # Global declaration must come first
-    
-    if not tenant_name:
-        return True  # No tenant filter, proceed with all
-    
-    tenants = list(netbox.tenancy.get_tenants(name=tenant_name))
-    if tenants:
-        print(f"Target tenant '{tenant_name}' found - restricting migration to this tenant")
-        TARGET_TENANT_ID = tenants[0].id if hasattr(tenants[0], 'id') else tenants[0]['id']
-        print(f"Using tenant ID: {TARGET_TENANT_ID}")
-        return True
-    else:
-        try:
-            print(f"Target tenant '{tenant_name}' not found in NetBox, creating it...")
-            new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
-            
-            TARGET_TENANT_ID = new_tenant.id if hasattr(new_tenant, 'id') else new_tenant['id']
-            print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
-            
-            return True
-        except Exception as e:
-            print(f"ERROR: Failed to create tenant '{tenant_name}': {e}")
-            return False
-
 def create_global_tags(netbox, tags):
     """
     Create tags in NetBox if they don't already exist
@@ -198,27 +141,6 @@ def ensure_tag_exists(netbox, tag_name):
     except Exception as e:
         print(f"Failed to create tag {tag_name}: {e}")
         return False
-
-def is_available_prefix(prefix_name, comment):
-    """
-    Determine if a prefix should be marked as available based on its data
-    
-    Args:
-        prefix_name: Name of the prefix from Racktables
-        comment: Comment for the prefix from Racktables
-        
-    Returns:
-        bool: True if prefix should be marked as available, False otherwise
-    """
-    # If name and comment are both empty or None, mark as available
-    if (not prefix_name or prefix_name.strip() == "") and (not comment or comment.strip() == ""):
-        return True
-    
-    # Check for the dragon icon indicators or other available markers
-    if prefix_name and ("[Here be dragons" in prefix_name or "[create network here]" in prefix_name):
-        return True
-        
-    return False
 
 def format_prefix_description(prefix_name, tags, comment):
     """
