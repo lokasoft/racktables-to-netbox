@@ -101,7 +101,7 @@ def verify_site_exists(netbox, site_name):
     if not site_name:
         return True  # No site filter, proceed with all
     
-    sites = netbox.dcim.get_sites(name=site_name)
+    sites = list(netbox.dcim.get_sites(name=site_name))
     if sites:
         print(f"Target site '{site_name}' found - restricting migration to this site")
         return True
@@ -125,10 +125,10 @@ def verify_tenant_exists(netbox, tenant_name):
     if not tenant_name:
         return True  # No tenant filter, proceed with all
     
-    tenants = netbox.tenancy.get_tenants(name=tenant_name)
+    tenants = list(netbox.tenancy.get_tenants(name=tenant_name))
     if tenants:
         print(f"Target tenant '{tenant_name}' found - restricting migration to this tenant")
-        TARGET_TENANT_ID = tenants[0]['id']
+        TARGET_TENANT_ID = tenants[0].id if hasattr(tenants[0], 'id') else tenants[0]['id']
         print(f"Using tenant ID: {TARGET_TENANT_ID}")
         return True
     else:
@@ -136,7 +136,7 @@ def verify_tenant_exists(netbox, tenant_name):
             print(f"Target tenant '{tenant_name}' not found in NetBox, creating it...")
             new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
             
-            TARGET_TENANT_ID = new_tenant['id']
+            TARGET_TENANT_ID = new_tenant.id if hasattr(new_tenant, 'id') else new_tenant['id']
             print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
             
             return True
@@ -152,7 +152,15 @@ def create_global_tags(netbox, tags):
         netbox: NetBox client instance
         tags: Set of tag names to create
     """
-    global_tags = set(tag['name'] for tag in netbox.extras.get_tags())
+    # Convert tags from NetBox to a list of names
+    tag_objects = list(netbox.extras.get_tags())
+    global_tags = set()
+    
+    for tag in tag_objects:
+        if hasattr(tag, 'name'):
+            global_tags.add(tag.name)
+        elif isinstance(tag, dict) and 'name' in tag:
+            global_tags.add(tag['name'])
     
     for tag in tags:
         if tag not in global_tags:
@@ -224,10 +232,18 @@ def format_prefix_description(prefix_name, tags, comment):
     Returns:
         str: Formatted description string
     """
-    tag_names = ", ".join([tag['name'] for tag in tags]) if tags else ""
+    # Extract tag names consistently whether they're objects or dicts
+    tag_names = []
+    for tag in tags:
+        if hasattr(tag, 'name'):
+            tag_names.append(tag.name)
+        elif isinstance(tag, dict) and 'name' in tag:
+            tag_names.append(tag['name'])
+    
+    tag_str = ", ".join(tag_names) if tag_names else ""
     description = f"{prefix_name}"
-    if tag_names:
-        description += f" [{tag_names}]"
+    if tag_str:
+        description += f" [{tag_str}]"
     if comment:
         description += f" - {comment}" if description else comment
         
