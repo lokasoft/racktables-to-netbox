@@ -109,6 +109,43 @@ def verify_site_exists(netbox, site_name):
         print(f"ERROR: Target site '{site_name}' not found in NetBox")
         return False
 
+def verify_tenant_exists(netbox, tenant_name):
+    """
+    Verify that the specified tenant exists in NetBox
+    
+    Args:
+        netbox: NetBox client instance
+        tenant_name: Name of tenant to verify
+        
+    Returns:
+        bool: True if tenant exists or if tenant_name is None, False otherwise
+    """
+    if not tenant_name:
+        return True  # No tenant filter, proceed with all
+    
+    tenants = netbox.tenancy.get_tenants(name=tenant_name)
+    if tenants:
+        print(f"Target tenant '{tenant_name}' found - restricting migration to this tenant")
+        from migration.config import TARGET_TENANT_ID
+        global TARGET_TENANT_ID
+        TARGET_TENANT_ID = tenants[0]['id']
+        print(f"Using tenant ID: {TARGET_TENANT_ID}")
+        return True
+    else:
+        try:
+            print(f"Target tenant '{tenant_name}' not found in NetBox, creating it...")
+            new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
+            
+            from migration.config import TARGET_TENANT_ID
+            global TARGET_TENANT_ID
+            TARGET_TENANT_ID = new_tenant['id']
+            print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
+            
+            return True
+        except Exception as e:
+            print(f"ERROR: Failed to create tenant '{tenant_name}': {e}")
+            return False
+
 def create_global_tags(netbox, tags):
     """
     Create tags in NetBox if they don't already exist
