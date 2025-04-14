@@ -7,6 +7,7 @@ A modular Python package for migrating data from Racktables to NetBox. This tool
 - **Comprehensive Migration**: Transfer all your Racktables data to NetBox
 - **Modular Architecture**: Maintainable and extensible codebase for easier updates
 - **Site Filtering**: Restrict migration to specific sites when needed
+- **Tenant Filtering**: Restrict migration to specific tenants and associate objects with tenants
 - **Component Selection**: Choose which components to migrate with flexible flags
 - **Custom Fields**: Automatic setup of required custom fields in NetBox
 - **Extended Data Support**:
@@ -152,6 +153,12 @@ python migration/migrate.py
 # Migrate data for a specific site only
 python migration/migrate.py --site "YourSiteName"
 
+# Migrate data with a specific tenant
+python migration/migrate.py --tenant "YourTenantName"
+
+# Migrate data for a specific site and tenant
+python migration/migrate.py --site "YourSiteName" --tenant "YourTenantName"
+
 # Run only basic migration (no extended components)
 python migration/migrate.py --basic-only
 
@@ -201,13 +208,18 @@ racktables-to-netbox/
 
 ## Key Features
 
-### Site Filtering
+### Site and Tenant Filtering
 
-Restrict migration to a specific site:
+Restrict migration to a specific site and/or tenant:
 
 ```bash
-python migration/migrate.py --site "DataCenter1"
+python migration/migrate.py --site "DataCenter1" --tenant "CustomerA"
 ```
+
+This will:
+1. Only migrate objects associated with the specified site
+2. Associate all created objects with the specified tenant
+3. Create the tenant if it doesn't exist in NetBox
 
 ### Available Subnet Detection
 
