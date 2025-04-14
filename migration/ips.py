@@ -4,12 +4,12 @@ IP-related migration functions
 import ipaddress
 import random
 
-from racktables_netbox_migration.utils import (
+from migration.utils import (
     get_db_connection, get_cursor, pickleLoad, pickleDump, 
-    format_prefix_description, is_available_prefix
+    format_prefix_description
 )
-from racktables_netbox_migration.db import getTags, change_interface_name
-from racktables_netbox_migration.config import IPV4_TAG, IPV6_TAG, TARGET_TENANT_ID
+from migration.db import getTags, change_interface_name
+from migration.config import IPV4_TAG, IPV6_TAG, TARGET_TENANT_ID, TARGET_SITE, TARGET_SITE_ID
 
 def create_ip_networks(netbox, IP, target_site=None):
     """
@@ -21,6 +21,17 @@ def create_ip_networks(netbox, IP, target_site=None):
         target_site: Optional site name for filtering
     """
     print(f"\nCreating IPv{IP} Networks")
+    
+    # Import the status and association helpers
+    from migration.netbox_status import get_valid_status_choices, determine_prefix_status
+    from migration.site_tenant import get_site_tenant_params
+    
+    # Get valid status choices for prefixes in this NetBox instance
+    valid_statuses = get_valid_status_choices(netbox, 'prefix')
+    print(f"Valid prefix statuses in your NetBox: {', '.join(valid_statuses)}")
+    
+    # Get site and tenant parameters
+    association_params = get_site_tenant_params()
     
     # Load mapping of network IDs to VLAN info
     network_id_group_name_id = pickleLoad('network_id_group_name_id', dict())
@@ -34,6 +45,11 @@ def create_ip_networks(netbox, IP, target_site=None):
             cursor.execute(f"SELECT id,ip,mask,name,comment FROM IPv{IP}Network")
             ipv46Networks = cursor.fetchall()
     
+    # Track created prefixes for debug information
+    created_count = 0
+    skipped_count = 0
+    status_counts = {status: 0 for status in valid_statuses}
+    
     for network in ipv46Networks:
         Id, ip, mask, prefix_name, comment = network["id"], network["ip"], network["mask"], network["name"], network["comment"]
         
@@ -44,6 +60,7 @@ def create_ip_networks(netbox, IP, target_site=None):
         prefix = str(ipaddress.ip_address(ip)) + "/" + str(mask)
         
         if prefix in existing_prefixes:
+            skipped_count += 1
             continue
         
         # Get VLAN info if associated
@@ -57,31 +74,41 @@ def create_ip_networks(netbox, IP, target_site=None):
         # Get tags for this network
         tags = getTags(f"ipv{IP}net", Id)
         
-        # Determine if this network is available
-        status = "Available" if is_available_prefix(prefix_name, comment) else "active"
+        # Use the improved status determination logic
+        status = determine_prefix_status(prefix_name, comment, valid_statuses)
+        status_counts[status] += 1
         
         # Format description to include tags and prefix name
         description = format_prefix_description(prefix_name, tags, comment)
         
-        # Add tenant parameter if TARGET_TENANT_ID is specified
-        tenant_param = {}
-        if TARGET_TENANT_ID:
-            tenant_param = {"tenant": TARGET_TENANT_ID}
-        
         # Create the prefix in NetBox
         try:
-            netbox.ipam.create_ip_prefix(
-                vlan={"id": vlan_id} if vlan_name else None,
-                prefix=prefix,
-                status=status,
-                description=description,
-                custom_fields={'Prefix_Name': prefix_name},
-                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}] + tags,
-                **tenant_param  # Add tenant parameter
-            )
-            print(f"Created {prefix} - {prefix_name}")
+            # Prepare all parameters
+            params = {
+                'prefix': prefix,
+                'status': status,
+                'description': description,
+                'vlan': {"id": vlan_id} if vlan_name else None,
+                'custom_fields': {'Prefix_Name': prefix_name},
+                'tags': [{'name': IPV4_TAG if IP == "4" else IPV6_TAG}] + tags
+            }
+            
+            # Add site and tenant parameters
+            params.update(association_params)
+            
+            # Create the prefix with all parameters
+            netbox.ipam.create_ip_prefix(**params)
+            created_count += 1
+            print(f"Created {prefix} - {prefix_name} with status '{status}'")
         except Exception as e:
             print(f"Error creating {prefix}: {e}")
+    
+    # Print final summary of statuses assigned
+    print(f"IPv{IP} Networks: Created {created_count}, Skipped {skipped_count}")
+    print("Status assignments:")
+    for status, count in status_counts.items():
+        if count > 0:
+            print(f"  - {status}: {count}")
 
 def create_ip_allocated(netbox, IP, target_site=None):
     """
@@ -93,6 +120,12 @@ def create_ip_allocated(netbox, IP, target_site=None):
         target_site: Optional site name for filtering
     """
     print(f"Creating allocated IPv{IP} Addresses")
+    
+    # Import the association helper
+    from migration.site_tenant import get_site_tenant_params
+    
+    # Get site and tenant parameters
+    association_params = get_site_tenant_params()
     
     # Get existing IPs to avoid duplicates
     existing_ips = set(ip['address'] for ip in netbox.ipam.get_ip_addresses())
@@ -212,11 +245,6 @@ def create_ip_allocated(netbox, IP, target_site=None):
         else:
             interface_name = f"no_RT_name{random.randint(0, 99999)}"
         
-        # Add tenant parameter if TARGET_TENANT_ID is specified
-        tenant_param = {}
-        if TARGET_TENANT_ID:
-            tenant_param = {"tenant": TARGET_TENANT_ID}
-        
         # Determine if device is VM or physical device
         if objtype_id == 1504:  # VM
             device_or_vm = "vm"
@@ -231,18 +259,24 @@ def create_ip_allocated(netbox, IP, target_site=None):
             if interface_name == name:
                 # Add IP to existing interface
                 try:
-                    netbox.ipam.create_ip_address(
-                        address=string_ip,
-                        role=use_vrrp_role,
-                        assigned_object={'device' if device_or_vm == "device" else "virtual_machine": device_name},
-                        interface_type="virtual",
-                        assigned_object_type="dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
-                        assigned_object_id=interface_id,
-                        description=comment[:200] if comment else "",
-                        custom_fields={'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
-                        tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
-                        **tenant_param  # Add tenant parameter
-                    )
+                    # Prepare all parameters
+                    params = {
+                        'address': string_ip,
+                        'role': use_vrrp_role,
+                        'assigned_object': {'device' if device_or_vm == "device" else "virtual_machine": device_name},
+                        'interface_type': "virtual",
+                        'assigned_object_type': "dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
+                        'assigned_object_id': interface_id,
+                        'description': comment[:200] if comment else "",
+                        'custom_fields': {'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
+                        'tags': [{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
+                    }
+                    
+                    # Add site and tenant parameters
+                    params.update(association_params)
+                    
+                    # Create the IP address with all parameters
+                    netbox.ipam.create_ip_address(**params)
                     device_contained_same_interface = True
                     print(f"Created IP {string_ip} on {device_name}/{interface_name}")
                     break
@@ -286,35 +320,41 @@ def create_ip_allocated(netbox, IP, target_site=None):
                 continue
             
             try:
-                # Create a new virtual interface
+                # Create a new virtual interface with site and tenant parameters
                 if device_or_vm == "device":
-                    added_interface = netbox.dcim.create_interface(
-                        name=interface_name,
-                        interface_type="virtual",
-                        device_id=device_id,
-                        custom_fields={"Device_Interface_Type": "Virtual"}
-                    )
+                    interface_params = {
+                        'name': interface_name,
+                        'interface_type': "virtual",
+                        'device_id': device_id,
+                        'custom_fields': {"Device_Interface_Type": "Virtual"}
+                    }
+                    interface_params.update(association_params)
+                    added_interface = netbox.dcim.create_interface(**interface_params)
                 else:
-                    added_interface = netbox.virtualization.create_interface(
-                        name=interface_name,
-                        interface_type="virtual",
-                        virtual_machine=device_id,  # Pass ID directly
-                        custom_fields={"VM_Interface_Type": "Virtual"}
-                    )
+                    interface_params = {
+                        'name': interface_name,
+                        'interface_type': "virtual",
+                        'virtual_machine': device_id,
+                        'custom_fields': {"VM_Interface_Type": "Virtual"}
+                    }
+                    interface_params.update(association_params)
+                    added_interface = netbox.virtualization.create_interface(**interface_params)
                 
                 # Add IP to the new interface
-                netbox.ipam.create_ip_address(
-                    address=string_ip,
-                    role=use_vrrp_role,
-                    assigned_object_id=added_interface['id'],
-                    assigned_object={"device" if device_or_vm == "device" else "virtual_machine": device_id},  # Use ID
-                    interface_type="virtual",
-                    assigned_object_type="dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
-                    description=comment[:200] if comment else "",
-                    custom_fields={'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
-                    tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
-                    **tenant_param  # Add tenant parameter
-                )
+                ip_params = {
+                    'address': string_ip,
+                    'role': use_vrrp_role,
+                    'assigned_object_id': added_interface['id'],
+                    'assigned_object': {"device" if device_or_vm == "device" else "virtual_machine": device_id},
+                    'interface_type': "virtual",
+                    'assigned_object_type': "dcim.interface" if device_or_vm == "device" else "virtualization.vminterface",
+                    'description': comment[:200] if comment else "",
+                    'custom_fields': {'IP_Name': ip_name, 'Interface_Name': interface_name, 'IP_Type': ip_type},
+                    'tags': [{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
+                }
+                ip_params.update(association_params)
+                netbox.ipam.create_ip_address(**ip_params)
+                
                 print(f"Created new interface {interface_name} with IP {string_ip} on {device_name}")
             except Exception as e:
                 print(f"Error creating interface or IP: {e}")
@@ -330,6 +370,12 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
     """
     print(f"Creating non-allocated IPv{IP} Addresses")
     
+    # Import the association helper
+    from migration.site_tenant import get_site_tenant_params
+    
+    # Get site and tenant parameters
+    association_params = get_site_tenant_params()
+    
     # Get existing IPs to avoid duplicates
     existing_ips = set(ip['address'] for ip in netbox.ipam.get_ip_addresses())
     
@@ -339,10 +385,8 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
             cursor.execute(f"SELECT ip,name,comment FROM IPv{IP}Address")
             ip_addresses = cursor.fetchall()
     
-    # Add tenant parameter if TARGET_TENANT_ID is specified
-    tenant_param = {}
-    if TARGET_TENANT_ID:
-        tenant_param = {"tenant": TARGET_TENANT_ID}
+    created_count = 0
+    skipped_count = 0
     
     for ip_data in ip_addresses:
         ip = ip_data["ip"]
@@ -354,17 +398,27 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
         
         # Skip if already exists
         if string_ip in existing_ips:
+            skipped_count += 1
             continue
         
         # Create the IP address in NetBox
         try:
-            netbox.ipam.create_ip_address(
-                address=string_ip,
-                description=comment[:200] if comment else "",
-                custom_fields={'IP_Name': ip_name},
-                tags=[{'name': IPV4_TAG if IP == "4" else IPV6_TAG}],
-                **tenant_param  # Add tenant parameter
-            )
+            # Prepare all parameters
+            params = {
+                'address': string_ip,
+                'description': comment[:200] if comment else "",
+                'custom_fields': {'IP_Name': ip_name},
+                'tags': [{'name': IPV4_TAG if IP == "4" else IPV6_TAG}]
+            }
+            
+            # Add site and tenant parameters
+            params.update(association_params)
+            
+            # Create the IP address with all parameters
+            netbox.ipam.create_ip_address(**params)
+            created_count += 1
             print(f"Created non-allocated IP {string_ip}")
         except Exception as e:
             print(f"Error creating IP {string_ip}: {e}")
+    
+    print(f"Non-allocated IPs: Created {created_count}, Skipped {skipped_count}")
