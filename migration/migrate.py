@@ -56,6 +56,8 @@ def parse_arguments():
 
 def verify_site_exists(netbox, site_name):
     """Verify that the specified site exists in NetBox and create a matching tag"""
+    global TARGET_SITE_ID  # Global declaration must come first
+
     if not site_name:
         return True
     
@@ -69,7 +71,6 @@ def verify_site_exists(netbox, site_name):
         print(f"Created tag '{site_name}' to match site name")
         
         # Store the site ID in the global config
-        global TARGET_SITE_ID
         TARGET_SITE_ID = sites[0]['id']
         
         return True
@@ -81,7 +82,6 @@ def verify_site_exists(netbox, site_name):
             new_site = netbox.dcim.create_site(site_name, slugify(site_name))
             
             # Store the site ID in the global config
-            global TARGET_SITE_ID
             TARGET_SITE_ID = new_site['id']
             
             # Create a tag with the same name as the site
@@ -96,6 +96,8 @@ def verify_site_exists(netbox, site_name):
 
 def verify_tenant_exists(netbox, tenant_name):
     """Verify that the specified tenant exists in NetBox and create a matching tag"""
+    global TARGET_TENANT_ID  # Global declaration must come first
+
     if not tenant_name:
         return True
     
@@ -109,7 +111,6 @@ def verify_tenant_exists(netbox, tenant_name):
         print(f"Created tag '{tenant_name}' to match tenant name")
         
         # Store the tenant ID in the global config
-        global TARGET_TENANT_ID
         TARGET_TENANT_ID = tenants[0]['id']
         print(f"Using tenant ID: {TARGET_TENANT_ID}")
         
@@ -122,7 +123,6 @@ def verify_tenant_exists(netbox, tenant_name):
             new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
             
             # Store the tenant ID in the global config
-            global TARGET_TENANT_ID
             TARGET_TENANT_ID = new_tenant['id']
             print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
             
