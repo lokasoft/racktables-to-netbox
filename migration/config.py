@@ -27,8 +27,8 @@ CREATE_VIRTUAL_SERVICES =      True
 CREATE_NAT_MAPPINGS =          True
 CREATE_LOAD_BALANCING =        True
 CREATE_MONITORING_DATA =       True
-CREATE_AVAILABLE_SUBNETS =     True
-CREATE_IP_RANGES =             True
+CREATE_AVAILABLE_SUBNETS =     False
+CREATE_IP_RANGES =             False
 
 # Site filtering - set to None to process all sites, or specify a site name to restrict migration
 TARGET_SITE = None  # This can be set via command line args
