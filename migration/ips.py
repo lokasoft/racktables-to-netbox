@@ -207,6 +207,9 @@ def create_ip_allocated(netbox, IP, target_site=None):
                 print("Proceeding with all IP allocations.")
     
     # Process each IP allocation
+    created_count = 0
+    skipped_count = 0
+    
     for allocation in ip_allocations:
         object_id = allocation["object_id"]
         ip = allocation["ip"]
@@ -227,14 +230,19 @@ def create_ip_allocated(netbox, IP, target_site=None):
         
         device_name = device_name.strip()
         
-        # Format the IP address with CIDR notation
-        string_ip = str(ipaddress.ip_address(ip)) + ("" if IP == "6" else "/32")
+        # Format the IP address WITHOUT CIDR notation - CHANGED THIS LINE
+        string_ip = str(ipaddress.ip_address(ip))
         
         # Skip if already exists (unless shared IP)
-        if string_ip in existing_ips and ip_type != "shared":
+        existing_match = False
+        for existing_ip in existing_ips:
+            if existing_ip.startswith(string_ip + "/") or existing_ip == string_ip:
+                existing_match = True
+                break
+                
+        if existing_match and ip_type != "shared":
+            skipped_count += 1
             continue
-        
-        existing_ips.add(string_ip)
         
         # Set VRRP role if shared IP
         use_vrrp_role = "vrrp" if ip_type == "shared" else None
@@ -278,6 +286,7 @@ def create_ip_allocated(netbox, IP, target_site=None):
                     # Create the IP address with all parameters
                     netbox.ipam.create_ip_address(**params)
                     device_contained_same_interface = True
+                    created_count += 1
                     print(f"Created IP {string_ip} on {device_name}/{interface_name}")
                     break
                 except Exception as e:
@@ -354,10 +363,12 @@ def create_ip_allocated(netbox, IP, target_site=None):
                 }
                 ip_params.update(association_params)
                 netbox.ipam.create_ip_address(**ip_params)
-                
+                created_count += 1
                 print(f"Created new interface {interface_name} with IP {string_ip} on {device_name}")
             except Exception as e:
                 print(f"Error creating interface or IP: {e}")
+    
+    print(f"Allocated IPs: Created {created_count}, Skipped {skipped_count}")
 
 def create_ip_not_allocated(netbox, IP, target_site=None):
     """
@@ -393,11 +404,17 @@ def create_ip_not_allocated(netbox, IP, target_site=None):
         ip_name = ip_data["name"]
         comment = ip_data["comment"]
         
-        # Format the IP address with CIDR notation
-        string_ip = str(ipaddress.ip_address(ip)) + ("" if IP == "6" else "/32")
+        # Format the IP address WITHOUT CIDR notation - CHANGED THIS LINE
+        string_ip = str(ipaddress.ip_address(ip))
         
         # Skip if already exists
-        if string_ip in existing_ips:
+        existing_match = False
+        for existing_ip in existing_ips:
+            if existing_ip.startswith(string_ip + "/") or existing_ip == string_ip:
+                existing_match = True
+                break
+                
+        if existing_match:
             skipped_count += 1
             continue
         
