@@ -3,8 +3,8 @@ Functions for creating available subnet prefixes with improved detection
 """
 import ipaddress
 import requests
-from migration.utils import error_log, is_available_prefix, ensure_tag_exists
-from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL
+from migration.utils import error_log, ensure_tag_exists
+from migration.config import NB_HOST, NB_PORT, NB_TOKEN, NB_USE_SSL, TARGET_TENANT_ID
 
 def create_available_prefixes(netbox):
     """
@@ -15,8 +15,19 @@ def create_available_prefixes(netbox):
     """
     print("\nCreating available subnet prefixes using NetBox API...")
     
+    # Import helpers
+    from migration.netbox_status import get_valid_status_choices, determine_prefix_status
+    from migration.site_tenant import get_site_tenant_params
+    
+    # Get valid status choices
+    valid_statuses = get_valid_status_choices(netbox, 'prefix')
+    print(f"Valid prefix statuses in your NetBox: {', '.join(valid_statuses)}")
+    
     # Create the Available tag if it doesn't exist
     tag_exists = ensure_tag_exists(netbox, "Available")
+    
+    # Get site and tenant parameters
+    association_params = get_site_tenant_params()
     
     # Configure API access
     protocol = "https" if NB_USE_SSL else "http"
@@ -113,18 +124,29 @@ def create_available_prefixes(netbox):
             for available in available_prefixes:
                 prefix_str = available['prefix']
                 
+                # Use the improved status determination for available prefixes
+                status = determine_prefix_status("", "Available prefix", valid_statuses)
+                
                 # Create the available prefix - don't filter by prefix length
                 try:
                     # Only add tags if the tag exists
                     tags_param = [{'name': 'Available'}] if tag_exists else []
                     
-                    netbox.ipam.create_ip_prefix(
-                        prefix=prefix_str,
-                        description="Available prefix",
-                        tags=tags_param
-                    )
+                    # Prepare params
+                    params = {
+                        'prefix': prefix_str,
+                        'status': status,
+                        'description': "Available prefix",
+                        'tags': tags_param
+                    }
+                    
+                    # Add site and tenant parameters
+                    params.update(association_params)
+                    
+                    # Create the prefix with all parameters
+                    netbox.ipam.create_ip_prefix(**params)
                     available_count += 1
-                    print(f"Created available prefix: {prefix_str}")
+                    print(f"Created available prefix: {prefix_str} with status '{status}'")
                 except Exception as e:
                     error_log(f"Error creating available prefix {prefix_str}: {str(e)}")
                     print(f"DEBUG ERROR: {str(e)}")
@@ -144,8 +166,18 @@ def create_available_subnets(netbox):
     """
     print("\nAnalyzing IP space for available subnets...")
     
+    # Import helpers
+    from migration.netbox_status import get_valid_status_choices, determine_prefix_status
+    from migration.site_tenant import get_site_tenant_params
+    
+    # Get valid status choices
+    valid_statuses = get_valid_status_choices(netbox, 'prefix')
+    
     # Create the Available tag if it doesn't exist
     tag_exists = ensure_tag_exists(netbox, "Available")
+    
+    # Get site and tenant parameters
+    association_params = get_site_tenant_params()
     
     # Get all existing prefixes
     existing_prefixes = list(netbox.ipam.get_ip_prefixes())
@@ -209,6 +241,7 @@ def create_available_subnets(netbox):
     
     # Track created available subnets
     available_count = 0
+    status_counts = {status: 0 for status in valid_statuses}
     
     # Process each network group to find gaps
     for parent_prefix, child_prefixes in network_groups.items():
@@ -269,13 +302,25 @@ def create_available_subnets(netbox):
                                                 # Only add tags if the tag exists
                                                 tags_param = [{'name': 'Available'}] if tag_exists else []
                                                 
-                                                netbox.ipam.create_ip_prefix(
-                                                    prefix=str(subnet),
-                                                    description="Available subnet",
-                                                    tags=tags_param
-                                                )
+                                                # Use the improved status determination
+                                                status = determine_prefix_status("", "Available subnet", valid_statuses)
+                                                status_counts[status] += 1
+                                                
+                                                # Prepare params
+                                                params = {
+                                                    'prefix': str(subnet),
+                                                    'status': status,
+                                                    'description': "Available subnet",
+                                                    'tags': tags_param
+                                                }
+                                                
+                                                # Add site and tenant parameters
+                                                params.update(association_params)
+                                                
+                                                # Create the prefix with all parameters
+                                                netbox.ipam.create_ip_prefix(**params)
                                                 available_count += 1
-                                                print(f"Created available subnet: {subnet}")
+                                                print(f"Created available subnet: {subnet} with status '{status}'")
                                             except Exception as e:
                                                 error_log(f"Error creating available subnet {subnet}: {str(e)}")
                                                 print(f"DEBUG ERROR: {str(e)}")
@@ -307,13 +352,25 @@ def create_available_subnets(netbox):
                                         # Only add tags if the tag exists
                                         tags_param = [{'name': 'Available'}] if tag_exists else []
                                         
-                                        netbox.ipam.create_ip_prefix(
-                                            prefix=str(subnet),
-                                            description="Available end gap subnet",
-                                            tags=tags_param
-                                        )
+                                        # Use the improved status determination
+                                        status = determine_prefix_status("", "Available end gap subnet", valid_statuses)
+                                        status_counts[status] += 1
+                                        
+                                        # Prepare params
+                                        params = {
+                                            'prefix': str(subnet),
+                                            'status': status,
+                                            'description': "Available end gap subnet",
+                                            'tags': tags_param
+                                        }
+                                        
+                                        # Add site and tenant parameters
+                                        params.update(association_params)
+                                        
+                                        # Create the prefix with all parameters
+                                        netbox.ipam.create_ip_prefix(**params)
                                         available_count += 1
-                                        print(f"Created end gap subnet: {subnet}")
+                                        print(f"Created end gap subnet: {subnet} with status '{status}'")
                                     except Exception as e:
                                         error_log(f"Error creating end gap subnet {subnet}: {str(e)}")
                                         print(f"DEBUG ERROR: {str(e)}")
@@ -328,3 +385,7 @@ def create_available_subnets(netbox):
             print(f"DEBUG ERROR: {str(e)}")
     
     print(f"Created {available_count} available subnet prefixes")
+    print("Status assignments:")
+    for status, count in status_counts.items():
+        if count > 0:
+            print(f"  - {status}: {count}")
