@@ -47,6 +47,7 @@ def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Migrate data from Racktables to NetBox')
     parser.add_argument('--site', type=str, help='Target site name to restrict migration to')
+    parser.add_argument('--tenant', type=str, help='Target tenant name to restrict migration to')
     parser.add_argument('--config', type=str, help='Path to custom configuration file')
     parser.add_argument('--basic-only', action='store_true', help='Run only basic migration (no extended components)')
     parser.add_argument('--extended-only', action='store_true', help='Run only extended migration components')
@@ -67,14 +68,21 @@ def verify_site_exists(netbox, site_name):
         create_global_tags(netbox, [site_name])
         print(f"Created tag '{site_name}' to match site name")
         
+        # Store the site ID in the global config
+        global TARGET_SITE_ID
+        TARGET_SITE_ID = sites[0]['id']
+        
         return True
     else:
         # Create the site if it doesn't exist
         try:
             from slugify import slugify
             print(f"Target site '{site_name}' not found in NetBox, creating it...")
-            netbox.dcim.create_site(site_name, slugify(site_name))
-            print(f"Created site '{site_name}'")
+            new_site = netbox.dcim.create_site(site_name, slugify(site_name))
+            
+            # Store the site ID in the global config
+            global TARGET_SITE_ID
+            TARGET_SITE_ID = new_site['id']
             
             # Create a tag with the same name as the site
             from migration.utils import create_global_tags
@@ -84,6 +92,48 @@ def verify_site_exists(netbox, site_name):
             return True
         except Exception as e:
             print(f"ERROR: Failed to create site '{site_name}': {e}")
+            return False
+
+def verify_tenant_exists(netbox, tenant_name):
+    """Verify that the specified tenant exists in NetBox and create a matching tag"""
+    if not tenant_name:
+        return True
+    
+    tenants = netbox.tenancy.get_tenants(name=tenant_name)
+    if tenants:
+        print(f"Target tenant '{tenant_name}' found - restricting migration to this tenant")
+        
+        # Create a tag with the same name as the tenant
+        from migration.utils import create_global_tags
+        create_global_tags(netbox, [tenant_name])
+        print(f"Created tag '{tenant_name}' to match tenant name")
+        
+        # Store the tenant ID in the global config
+        global TARGET_TENANT_ID
+        TARGET_TENANT_ID = tenants[0]['id']
+        print(f"Using tenant ID: {TARGET_TENANT_ID}")
+        
+        return True
+    else:
+        # Create the tenant if it doesn't exist
+        try:
+            from slugify import slugify
+            print(f"Target tenant '{tenant_name}' not found in NetBox, creating it...")
+            new_tenant = netbox.tenancy.create_tenant(tenant_name, slugify(tenant_name))
+            
+            # Store the tenant ID in the global config
+            global TARGET_TENANT_ID
+            TARGET_TENANT_ID = new_tenant['id']
+            print(f"Created tenant '{tenant_name}' with ID: {TARGET_TENANT_ID}")
+            
+            # Create a tag with the same name as the tenant
+            from migration.utils import create_global_tags
+            create_global_tags(netbox, [tenant_name])
+            print(f"Created tag '{tenant_name}' to match tenant name")
+            
+            return True
+        except Exception as e:
+            print(f"ERROR: Failed to create tenant '{tenant_name}': {e}")
             return False
 
 def setup_custom_fields():
@@ -237,6 +287,12 @@ def main():
         TARGET_SITE = args.site
         logging.info(f"Filtering migration for site: {TARGET_SITE}")
     
+    # Set target tenant if specified
+    if args.tenant:
+        global TARGET_TENANT
+        TARGET_TENANT = args.tenant
+        logging.info(f"Filtering migration for tenant: {TARGET_TENANT}")
+    
     # Load custom config if specified
     if args.config:
         if os.path.exists(args.config):
@@ -280,6 +336,11 @@ def main():
     # Verify site exists
     if not verify_site_exists(netbox, TARGET_SITE):
         logging.error("Migration aborted: Target site not found")
+        return False
+    
+    # Verify tenant exists
+    if not verify_tenant_exists(netbox, TARGET_TENANT):
+        logging.error("Migration aborted: Target tenant not found")
         return False
     
     # Run migrations based on arguments
