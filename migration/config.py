@@ -59,11 +59,11 @@ NB_USE_SSL = os.environ.get('NETBOX_USE_SSL', 'False').lower() in ('true', '1', 
 
 # Database connection parameters - can be overridden with environment variables
 DB_CONFIG = {
-    'host': os.environ.get('RACKTABLES_DB_HOST', '10.248.48.4'),
+    'host': os.environ.get('RACKTABLES_DB_HOST', '192.168.11.29'),
     'port': int(os.environ.get('RACKTABLES_DB_PORT', '3306')),
-    'user': os.environ.get('RACKTABLES_DB_USER', 'root'),
-    'password': os.environ.get('RACKTABLES_DB_PASSWORD', 'secure-password'),
-    'db': os.environ.get('RACKTABLES_DB_NAME', 'test1'),
+    'user': os.environ.get('RACKTABLES_DB_USER', 'user'),
+    'password': os.environ.get('RACKTABLES_DB_PASSWORD', 'password'),
+    'db': os.environ.get('RACKTABLES_DB_NAME', 'racktables_db'),
     'charset': 'utf8mb4',
     'cursorclass': DictCursor
 }
@@ -99,11 +99,11 @@ OBJTYPE_ID_NAMES = {
     50067: "SGX",
     50083: "SBC SWE",
     # Don't create these with the unracked devices
-    # 1504: "VM",
-    # 1505: "VM Cluster",
-    # 1560: "Rack",
-    # 1561: "Row",
-    # 1562: "Location",
+    1504: "VM",
+    1505: "VM Cluster",
+    1560: "Rack",
+    1561: "Row",
+    1562: "Location",
 }
 
 # Manufacturer strings from Racktables
